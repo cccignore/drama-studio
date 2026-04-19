@@ -53,8 +53,9 @@ export function StudioTour({
     : { top: 96, left: 24 };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       <motion.div
+        key="tour-backdrop"
         className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-[2px]"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -63,6 +64,7 @@ export function StudioTour({
 
       {rect && (
         <motion.div
+          key={`tour-highlight-${index}`}
           className="pointer-events-none fixed z-[101] rounded-2xl border border-[color:var(--color-primary)]/80 shadow-[0_0_0_9999px_rgba(3,7,14,0.28)]"
           style={{
             top: rect.top - 8,
@@ -78,6 +80,7 @@ export function StudioTour({
       )}
 
       <motion.div
+        key={`tour-card-${index}`}
         className="fixed z-[102] w-[min(360px,calc(100vw-32px))] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-5 shadow-2xl"
         style={cardStyle}
         initial={{ opacity: 0, y: 12 }}

@@ -68,3 +68,56 @@ export function logEvent(projectId: string, command: string, type: string, paylo
     .prepare(`INSERT INTO events (project_id, command, type, payload_json, ts) VALUES (?, ?, ?, ?, ?)`)
     .run(projectId, command, type, payload === undefined ? null : JSON.stringify(payload), Date.now());
 }
+
+export interface EventRecord {
+  id: number;
+  command: string;
+  type: string;
+  payload: unknown;
+  ts: number;
+}
+
+export function listEvents(
+  projectId: string,
+  opts: { command?: string; sinceTs?: number; limit?: number } = {}
+): EventRecord[] {
+  const clauses = ["project_id = ?"];
+  const args: unknown[] = [projectId];
+  if (opts.command) {
+    clauses.push("command = ?");
+    args.push(opts.command);
+  }
+  if (typeof opts.sinceTs === "number") {
+    clauses.push("ts > ?");
+    args.push(opts.sinceTs);
+  }
+  const limit = Math.min(Math.max(opts.limit ?? 500, 1), 2000);
+  const rows = getDb()
+    .prepare(
+      `SELECT id, command, type, payload_json, ts FROM events WHERE ${clauses.join(
+        " AND "
+      )} ORDER BY ts ASC, id ASC LIMIT ?`
+    )
+    .all(...args, limit) as {
+    id: number;
+    command: string;
+    type: string;
+    payload_json: string | null;
+    ts: number;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    command: r.command,
+    type: r.type,
+    ts: r.ts,
+    payload: r.payload_json ? safeParse(r.payload_json) : null,
+  }));
+}
+
+function safeParse(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return json;
+  }
+}
