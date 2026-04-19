@@ -20,8 +20,8 @@ export interface ScreenplayAST {
   charCount: number;
 }
 
-const EP_RE = /^#\s+第?\s*(\d+)\s*集\s*[·•\-]\s*(.+?)\s*$/;
-const SCENE_RE = /^##\s+场?\s*(\d+)\s*[·•\-]\s*(.+?)\s*$/;
+const EP_RE = /^#\s+(?:第?\s*(\d+)\s*集|Episode\s*(\d+))\s*[·•\-]\s*(.+?)\s*$/i;
+const SCENE_RE = /^##\s+(?:场?\s*(\d+)|Scene\s*(\d+))\s*[·•\-]\s*(.+?)\s*$/i;
 const ACTION_RE = /^△\s*(.+?)\s*$/;
 const MUSIC_RE = /^[♪♫🎵]\s*(?:音乐提示\s*[:：]\s*)?(.+?)\s*$/;
 const DIALOGUE_RE = /^\*\*([^*\n]+?)\*\*\s*(?:[（(]([^）)]*)[）)])?\s*[：:]\s*(.+?)\s*$/;
@@ -47,25 +47,25 @@ export function parseScreenplay(markdown: string): ScreenplayAST {
     const line = raw.trim();
     if (!line) continue;
 
-    if (line.includes("【本集完】")) {
+    if (line.includes("【本集完】") || /【END OF EPISODE】/i.test(line)) {
       ast.closed = true;
       continue;
     }
 
     const epM = line.match(EP_RE);
     if (epM) {
-      ast.episodeIndex = parseInt(epM[1], 10);
-      ast.title = epM[2].trim();
+      ast.episodeIndex = parseInt(epM[1] || epM[2], 10);
+      ast.title = epM[3].trim();
       continue;
     }
 
     const sceneM = line.match(SCENE_RE);
     if (sceneM) {
       flushScene();
-      const full = sceneM[2].trim();
+      const full = sceneM[3].trim();
       const locMatch = full.match(/^(.+?)\s*[（(]\s*(.+?)\s*[)）]\s*$/);
       currentScene = {
-        index: parseInt(sceneM[1], 10),
+        index: parseInt(sceneM[1] || sceneM[2], 10),
         name: locMatch ? locMatch[1].trim() : full,
         location: locMatch ? locMatch[2].split(/[\/／]/)[0]?.trim() : undefined,
         time: locMatch ? locMatch[2].split(/[\/／]/)[1]?.trim() : undefined,

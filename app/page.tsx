@@ -38,12 +38,12 @@ export default function LandingPage() {
           AI 编剧流水线
         </div>
         <h1 className="text-5xl font-semibold leading-tight tracking-tight md:text-6xl">
-          从选题到成片，<br />
+          从选题到导出，<br />
           <span className="title-gradient">把短剧剧本做成流水线</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-[15px] leading-relaxed text-[color:var(--color-muted-foreground)]">
           不需要懂命令行、不需要写 prompt。选题材 → 生成方案 → 角色关系 → 分集目录 → 逐集剧本
-          → 自检评分 → 一键导出。每一步都被打磨成"工作台体验"。
+          → 自检评分 → 一键导出。首次使用建议先跑通一个 5 集迷你剧闭环，再扩展到长剧。
         </p>
         <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
           <Link href="/studio">

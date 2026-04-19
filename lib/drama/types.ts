@@ -21,6 +21,8 @@ export interface DramaState {
   mode: "domestic" | "overseas";
   dramaTitle: string;
   freeText?: string;
+  multiAgentEnabled?: boolean;
+  multiAgentCommands?: ("plan" | "episode")[];
 }
 
 export function defaultDramaState(): DramaState {
@@ -33,6 +35,8 @@ export function defaultDramaState(): DramaState {
     language: "zh-CN",
     mode: "domestic",
     dramaTitle: "",
+    multiAgentEnabled: false,
+    multiAgentCommands: ["episode"],
   };
 }
 

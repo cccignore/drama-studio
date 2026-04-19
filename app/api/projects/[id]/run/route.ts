@@ -7,7 +7,12 @@ import { getProject, logEvent, updateProject } from "@/lib/drama/store";
 import { resolveConfigForCommand } from "@/lib/llm/router";
 import { streamLLM } from "@/lib/llm/stream";
 import { getLLMConfig } from "@/lib/llm/store";
-import { canRunCommand, advanceAfter, COMMAND_TO_STEP } from "@/lib/drama/state-machine";
+import {
+  canRunCommand,
+  advanceAfter,
+  COMMAND_TO_STEP,
+  promoteStep,
+} from "@/lib/drama/state-machine";
 import { loadRefsForCommand } from "@/lib/drama/references";
 import {
   getEpisodeIndices,
@@ -21,15 +26,26 @@ import { buildCharactersMessages } from "@/lib/drama/prompts/characters";
 import { buildOutlineMessages } from "@/lib/drama/prompts/outline";
 import { buildEpisodeMessages } from "@/lib/drama/prompts/episode";
 import { buildReviewMessages } from "@/lib/drama/prompts/review";
+import { buildOverseasMessages } from "@/lib/drama/prompts/overseas";
+import { buildComplianceMessages } from "@/lib/drama/prompts/compliance";
+import {
+  buildEpisodeCriticMessages,
+  buildEpisodePlannerMessages,
+  buildPlanCriticMessages,
+  buildPlanPlannerMessages,
+} from "@/lib/drama/prompts/multi-agent";
 import { extractMermaid } from "@/lib/drama/parsers/extract-mermaid";
+import { sanitizeMermaid } from "@/lib/drama/parsers/sanitize-mermaid";
 import { parseDirectory } from "@/lib/drama/parsers/extract-directory";
 import { extractEpisodeOutline } from "@/lib/drama/parsers/extract-episode-outline";
+import { extractPlanCurve } from "@/lib/drama/parsers/extract-plan-curve";
 import {
   extractEpisodeTail,
   parseScreenplay,
   summarizeScreenplay,
 } from "@/lib/drama/parsers/screenplay";
 import { extractReviewJson } from "@/lib/drama/parsers/extract-review-json";
+import { extractComplianceJson } from "@/lib/drama/parsers/extract-compliance-json";
 import type { Project } from "@/lib/drama/types";
 import type { LLMConfig, LLMMessage } from "@/lib/llm/types";
 
@@ -50,6 +66,13 @@ type RunCtx = {
   signal: AbortSignal;
 };
 
+type StreamCollectOptions = {
+  streamPartial?: boolean;
+  emitUsage?: boolean;
+};
+
+type MultiAgentCommand = "plan" | "episode";
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
@@ -63,7 +86,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
     const { command, args, configId } = parsed.data;
 
-    const check = canRunCommand(command, project.state);
+    const writtenEpisodes = getEpisodeIndices(id).length;
+    const reviewedEpisodes = getReviewIndices(id).length;
+    const check = canRunCommand(command, project.state, { writtenEpisodes, reviewedEpisodes });
     if (!check.ok) throw new AppError("stage_blocked", check.reason, 400);
 
     const cfg = configId ? getLLMConfig(configId, true) : resolveConfigForCommand(command, id);
@@ -97,6 +122,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             await runEpisode(ctx);
           } else if (command === "review") {
             await runReview(ctx);
+          } else if (command === "overseas") {
+            await runOverseas(ctx);
+          } else if (command === "compliance") {
+            await runCompliance(ctx);
           } else {
             send({
               type: "error",
@@ -140,20 +169,92 @@ async function streamAndCollect(
   cfg: LLMConfig,
   messages: LLMMessage[],
   opts: { temperature?: number; maxTokens?: number; signal: AbortSignal },
-  send: SSESender
+  send: SSESender,
+  collectOpts: StreamCollectOptions = {}
 ): Promise<string> {
+  const { streamPartial = true, emitUsage = true } = collectOpts;
   let acc = "";
   for await (const ev of streamLLM(cfg, messages, opts)) {
     if (ev.type === "delta") {
       acc += ev.text;
-      send({ type: "partial", text: ev.text });
+      if (streamPartial) send({ type: "partial", text: ev.text });
     } else if (ev.type === "error") {
       throw new Error(ev.message);
     } else if (ev.type === "done") {
-      send({ type: "usage", usage: ev.usage ?? null });
+      if (emitUsage) send({ type: "usage", usage: ev.usage ?? null });
     }
   }
   return acc;
+}
+
+function summarizePreview(text: string, maxChars = 240): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars)}…`;
+}
+
+function multiAgentEnabled(project: Project, command: MultiAgentCommand): boolean {
+  return Boolean(
+    project.state.multiAgentEnabled &&
+      project.state.multiAgentCommands?.includes(command)
+  );
+}
+
+function excerptForCompliance(content: string, maxChars = 2200): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  const head = trimmed.slice(0, Math.floor(maxChars * 0.6));
+  const tail = trimmed.slice(-Math.floor(maxChars * 0.28));
+  return `${head}\n\n[...中段已截断...]\n\n${tail}`;
+}
+
+async function runAgentTask({
+  cfg,
+  messages,
+  send,
+  signal,
+  role,
+  title,
+  episode,
+  temperature = 0.4,
+  maxTokens = 1200,
+}: {
+  cfg: LLMConfig;
+  messages: LLMMessage[];
+  send: SSESender;
+  signal: AbortSignal;
+  role: "planner" | "critic" | "writer";
+  title: string;
+  episode?: number;
+  temperature?: number;
+  maxTokens?: number;
+}): Promise<string> {
+  send({
+    type: "agent",
+    status: "start",
+    role,
+    title,
+    model: cfg.name,
+    episode,
+  });
+  const content = await streamAndCollect(
+    cfg,
+    messages,
+    { temperature, maxTokens, signal },
+    send,
+    { streamPartial: false, emitUsage: false }
+  );
+  send({
+    type: "agent",
+    status: "done",
+    role,
+    title,
+    model: cfg.name,
+    episode,
+    chars: content.length,
+    preview: summarizePreview(content),
+  });
+  return content;
 }
 
 async function runPing({ cfg, args, send, signal }: RunCtx) {
@@ -213,16 +314,82 @@ async function runPlan({ cfg, project, send, signal }: RunCtx) {
   if (!startCard) throw new Error("缺少立项卡，请先完成 /start");
   send({ type: "progress", stage: "compose-prompt", message: "加载节奏曲线与付费策略参考 …" });
   const refs = loadRefsForCommand("plan");
-  const messages = buildPlanMessages(project.state, startCard.content, refs);
+  let plannerBrief: string | undefined;
+  let criticNotes: string | undefined;
+
+  if (multiAgentEnabled(project, "plan")) {
+    send({
+      type: "progress",
+      stage: "multi-agent",
+      message: "Multi-agent 已启用：Planner / Critic 正在协同搭建节奏骨架 …",
+    });
+    plannerBrief = await runAgentTask({
+      cfg: resolveConfigForCommand("plan", project.id) ?? cfg,
+      messages: buildPlanPlannerMessages(project.state, startCard.content, refs),
+      send,
+      signal,
+      role: "planner",
+      title: "Planner 节奏骨架",
+      temperature: 0.45,
+      maxTokens: 1400,
+    });
+    criticNotes = await runAgentTask({
+      cfg: resolveConfigForCommand("review", project.id) ?? cfg,
+      messages: buildPlanCriticMessages(project.state, plannerBrief),
+      send,
+      signal,
+      role: "critic",
+      title: "Critic 节奏审校",
+      temperature: 0.2,
+      maxTokens: 1000,
+    });
+  }
+
+  const messages = buildPlanMessages(project.state, startCard.content, refs, {
+    plannerBrief,
+    criticNotes,
+  });
   send({ type: "progress", stage: "calling-llm", message: `正在调用 ${cfg.name} 设计节奏 …` });
+  send({
+    type: "agent",
+    status: "start",
+    role: "writer",
+    title: "Writer 最终节奏稿",
+    model: cfg.name,
+  });
   const content = await streamAndCollect(
     cfg,
     messages,
     { temperature: 0.7, maxTokens: 2200, signal },
     send
   );
-  const artifact = saveArtifact({ projectId: project.id, name: "plan", content });
-  send({ type: "artifact", name: "plan", version: artifact.version, length: content.length });
+  send({
+    type: "agent",
+    status: "done",
+    role: "writer",
+    title: "Writer 最终节奏稿",
+    model: cfg.name,
+    chars: content.length,
+    preview: summarizePreview(content),
+  });
+  const curve = extractPlanCurve(content);
+  const artifact = saveArtifact({
+    projectId: project.id,
+    name: "plan",
+    content,
+    meta: {
+      curve,
+      pointCount: curve.length,
+      paywallEpisodes: curve.filter((item) => item.paywall).map((item) => item.episode),
+    },
+  });
+  send({
+    type: "artifact",
+    name: "plan",
+    version: artifact.version,
+    length: content.length,
+    pointCount: curve.length,
+  });
 }
 
 async function runCharacters({ cfg, project, send, signal }: RunCtx) {
@@ -240,18 +407,28 @@ async function runCharacters({ cfg, project, send, signal }: RunCtx) {
     send
   );
   const mm = extractMermaid(content);
+  const normalizedContent = mm.code
+    ? content.replace(
+        /```mermaid\s*\n([\s\S]*?)```/i,
+        `\`\`\`mermaid\n${sanitizeMermaid(mm.code)}\n\`\`\``
+      )
+    : content;
+  const normalizedMermaid = extractMermaid(normalizedContent);
   const artifact = saveArtifact({
     projectId: project.id,
     name: "characters",
-    content,
-    meta: { hasMermaid: !!mm.code, mermaidChars: mm.code?.length ?? 0 },
+    content: normalizedContent,
+    meta: {
+      hasMermaid: !!normalizedMermaid.code,
+      mermaidChars: normalizedMermaid.code?.length ?? 0,
+    },
   });
   send({
     type: "artifact",
     name: "characters",
     version: artifact.version,
-    length: content.length,
-    hasMermaid: !!mm.code,
+    length: normalizedContent.length,
+    hasMermaid: !!normalizedMermaid.code,
   });
 }
 
@@ -333,8 +510,11 @@ async function runEpisode(ctx: RunCtx) {
     return;
   }
 
-  const refs = loadRefsForCommand("episode");
   const rewriteHint = typeof args.rewriteHint === "string" ? (args.rewriteHint as string) : undefined;
+  const overseasBrief =
+    project.state.mode === "overseas"
+      ? getLatestArtifact(project.id, "overseas-brief")
+      : null;
 
   for (const epIdx of targets) {
     if (signal.aborted) throw new Error("已取消");
@@ -345,11 +525,68 @@ async function runEpisode(ctx: RunCtx) {
     }
     const prev = epIdx > 1 ? getLatestArtifact(project.id, `episode-${epIdx - 1}`) : null;
     const prevTail = prev ? extractEpisodeTail(prev.content, 800) : undefined;
+    const refs = loadRefsForCommand("episode", { episodeIndex: epIdx });
+    let storyBeat: string | undefined;
+    let polishNotes: string | undefined;
+
+    if (multiAgentEnabled(project, "episode")) {
+      send({
+        type: "progress",
+        stage: "multi-agent",
+        message: `第 ${epIdx} 集启用多角色协同：Planner / Critic 正在准备写作约束 …`,
+        episode: epIdx,
+      });
+      const plannerCtx = {
+        episodeIndex: epIdx,
+        episodeOutline: epOutline,
+        planSummary: plan.content,
+        charactersSummary: characters.content,
+        prevEpisodeTail: prevTail,
+        rewriteHint,
+        overseasBrief: overseasBrief?.content,
+      };
+      storyBeat = await runAgentTask({
+        cfg: resolveConfigForCommand("episode", project.id) ?? cfg,
+        messages: buildEpisodePlannerMessages(project.state, plannerCtx, refs),
+        send,
+        signal,
+        role: "planner",
+        title: "Planner 单集 Beat Sheet",
+        episode: epIdx,
+        temperature: 0.5,
+        maxTokens: 1200,
+      });
+      polishNotes = await runAgentTask({
+        cfg: resolveConfigForCommand("review", project.id) ?? cfg,
+        messages: buildEpisodeCriticMessages(project.state, plannerCtx, storyBeat),
+        send,
+        signal,
+        role: "critic",
+        title: "Critic 单集审校意见",
+        episode: epIdx,
+        temperature: 0.2,
+        maxTokens: 900,
+      });
+    }
 
     send({
       type: "progress",
       stage: "calling-llm",
-      message: `正在写第 ${epIdx} 集（${cfg.name}）…`,
+      message:
+        project.state.mode === "overseas"
+          ? `正在写第 ${epIdx} 集英文版（${cfg.name}）…`
+          : `正在写第 ${epIdx} 集（${cfg.name}）…`,
+      episode: epIdx,
+    });
+    send({
+      type: "agent",
+      status: "start",
+      role: "writer",
+      title:
+        project.state.mode === "overseas"
+          ? "Writer 英文终稿"
+          : "Writer 剧本终稿",
+      model: cfg.name,
       episode: epIdx,
     });
 
@@ -362,6 +599,9 @@ async function runEpisode(ctx: RunCtx) {
         charactersSummary: characters.content,
         prevEpisodeTail: prevTail,
         rewriteHint,
+        storyBeat,
+        polishNotes,
+        overseasBrief: overseasBrief?.content,
       },
       refs
     );
@@ -371,6 +611,19 @@ async function runEpisode(ctx: RunCtx) {
       { temperature: 0.8, maxTokens: 3200, signal },
       send
     );
+    send({
+      type: "agent",
+      status: "done",
+      role: "writer",
+      title:
+        project.state.mode === "overseas"
+          ? "Writer 英文终稿"
+          : "Writer 剧本终稿",
+      model: cfg.name,
+      episode: epIdx,
+      chars: content.length,
+      preview: summarizePreview(content),
+    });
     const ast = parseScreenplay(content);
     const stats = summarizeScreenplay(ast);
     const artifact = saveArtifact({
@@ -524,6 +777,12 @@ async function runReview(ctx: RunCtx) {
   const totalExpected = project.state.totalEpisodes || 0;
   const reviewed = getReviewIndices(project.id);
   const fresh = getProject(project.id);
+  if (fresh && reviewed.length > 0 && fresh.state.currentStep === "episode") {
+    const promoted = promoteStep(fresh.state, "review");
+    updateProject(project.id, { state: promoted });
+    send({ type: "state", state: promoted, reviewed: reviewed.length, total: totalExpected });
+    return;
+  }
   if (fresh && totalExpected && reviewed.length >= totalExpected) {
     const nextState = advanceAfter("review", fresh.state);
     updateProject(project.id, { state: nextState });
@@ -531,4 +790,128 @@ async function runReview(ctx: RunCtx) {
   } else if (fresh) {
     send({ type: "state", state: fresh.state, reviewed: reviewed.length, total: totalExpected });
   }
+}
+
+async function runOverseas({ cfg, project, send, signal }: RunCtx) {
+  const startCard = getLatestArtifact(project.id, "start-card");
+  if (!startCard) throw new Error("缺少立项卡，请先完成 /start");
+  const plan = getLatestArtifact(project.id, "plan");
+  const characters = getLatestArtifact(project.id, "characters");
+  const outline = getLatestArtifact(project.id, "outline");
+
+  send({
+    type: "progress",
+    stage: "compose-prompt",
+    message: "加载项目现状并生成 overseas adaptation brief …",
+  });
+
+  const refs = loadRefsForCommand("overseas");
+  const messages = buildOverseasMessages(
+    { ...project.state, mode: "overseas", language: "en-US" },
+    {
+      startCard: startCard.content,
+      plan: plan?.content,
+      characters: characters?.content,
+      outline: outline?.content,
+    },
+    refs
+  );
+  send({
+    type: "progress",
+    stage: "calling-llm",
+    message: `正在调用 ${cfg.name} 生成出海适配方案 …`,
+  });
+  const content = await streamAndCollect(
+    cfg,
+    messages,
+    { temperature: 0.55, maxTokens: 2200, signal },
+    send
+  );
+  const artifact = saveArtifact({
+    projectId: project.id,
+    name: "overseas-brief",
+    content,
+    meta: { language: "en-US", mode: "overseas" },
+  });
+  const updated = updateProject(project.id, {
+    state: { mode: "overseas", language: "en-US" },
+  });
+  send({
+    type: "artifact",
+    name: "overseas-brief",
+    version: artifact.version,
+    length: content.length,
+  });
+  if (updated) send({ type: "state", state: updated.state });
+}
+
+async function runCompliance({ cfg, project, send, signal }: RunCtx) {
+  const episodeIdxs = getEpisodeIndices(project.id);
+  if (episodeIdxs.length === 0) throw new Error("请至少先写出 1 集剧本后再做合规审查");
+
+  const inputs = episodeIdxs
+    .map((index) => {
+      const artifact = getLatestArtifact(project.id, `episode-${index}`);
+      if (!artifact) return null;
+      return {
+        index,
+        excerpt: excerptForCompliance(artifact.content),
+      };
+    })
+    .filter((item): item is { index: number; excerpt: string } => !!item);
+
+  const refs = loadRefsForCommand("compliance");
+  let attempt = 0;
+  let retryHint: string | undefined;
+  let parsed: ReturnType<typeof extractComplianceJson> | null = null;
+  let rawContent = "";
+
+  while (attempt < 2) {
+    attempt += 1;
+    send({
+      type: "progress",
+      stage: "calling-llm",
+      message: `正在生成合规审查报告${attempt > 1 ? "（重试）" : ""}…`,
+      attempt,
+    });
+    const messages = buildComplianceMessages(project.state, inputs, refs, retryHint);
+    rawContent = await streamAndCollect(
+      cfg,
+      messages,
+      { temperature: 0.2, maxTokens: 2600, signal },
+      send,
+      { streamPartial: false }
+    );
+    parsed = extractComplianceJson(rawContent);
+    if (parsed.ok) break;
+    retryHint = parsed.error;
+    send({
+      type: "progress",
+      stage: "retry",
+      message: `合规 JSON 校验失败：${parsed.error}`,
+      attempt,
+    });
+  }
+
+  if (!parsed || !parsed.ok) {
+    throw new Error(parsed?.error ?? "合规审查报告生成失败");
+  }
+
+  const artifact = saveArtifact({
+    projectId: project.id,
+    name: "compliance-report",
+    content: JSON.stringify(parsed.data, null, 2),
+    meta: {
+      totals: parsed.data.totals,
+      episodes: episodeIdxs,
+      itemCount: parsed.data.items.length,
+    },
+  });
+  send({
+    type: "artifact",
+    name: "compliance-report",
+    version: artifact.version,
+    length: artifact.content.length,
+    totals: parsed.data.totals,
+  });
 }

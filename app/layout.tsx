@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Drama Studio · 短剧创作工作台",
-  description: "从选题到成片的 AI 短剧剧本生产线",
+  description: "从选题到脚本导出的 AI 短剧创作工作台",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

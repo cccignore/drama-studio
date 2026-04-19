@@ -1,5 +1,6 @@
 import type { LLMConfig, LLMMessage, LLMStreamEvent, LLMCallOptions } from "../types";
 import { iterSSELines } from "../sse-parse";
+import { friendlyNetworkError, friendlyUpstreamError } from "../provider-error";
 
 /**
  * OpenAI-compatible chat completions endpoint（DeepSeek / OpenAI / SiliconFlow / 通义等）
@@ -29,13 +30,13 @@ export async function* streamOpenAICompat(
     res = await fetch(url, { method: "POST", headers, body, signal: opts.signal });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    yield { type: "error", message: `网络错误：${msg}` };
+    yield { type: "error", message: friendlyNetworkError(msg) };
     return;
   }
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
-    yield { type: "error", message: `上游返回 ${res.status}：${text.slice(0, 400)}` };
+    yield { type: "error", message: friendlyUpstreamError(res.status, text) };
     return;
   }
 

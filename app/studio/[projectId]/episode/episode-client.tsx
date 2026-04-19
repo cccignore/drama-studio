@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { AgentWorkflowPanel } from "@/components/drama/agent-workflow-panel";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import { ScreenplayRenderer } from "@/components/drama/screenplay-renderer";
@@ -38,18 +39,18 @@ export interface EpisodeEntry extends EpisodeBrief {
 interface Props {
   projectId: string;
   totalEpisodes: number;
-  currentStep: string;
   entries: EpisodeEntry[];
   initialIndex: number;
+  multiAgentEnabled: boolean;
   initialContent: string | null;
 }
 
 export function EpisodeStepClient({
   projectId,
   totalEpisodes,
-  currentStep,
   entries: initialEntries,
   initialIndex,
+  multiAgentEnabled,
   initialContent,
 }: Props) {
   const router = useRouter();
@@ -60,7 +61,6 @@ export function EpisodeStepClient({
   const [rangeFrom, setRangeFrom] = React.useState<number>(1);
   const [rangeTo, setRangeTo] = React.useState<number>(Math.min(5, totalEpisodes));
   const [rewriteHint, setRewriteHint] = React.useState("");
-  const [atState, setAtState] = React.useState(currentStep);
 
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
@@ -71,10 +71,6 @@ export function EpisodeStepClient({
         setEntries((prev) =>
           prev.map((e) => (e.index === epIdx ? { ...e, written: true } : e))
         );
-      }
-      if (ev.type === "state" && ev.state && typeof ev.state === "object") {
-        const s = ev.state as { currentStep?: string };
-        if (s.currentStep) setAtState(s.currentStep);
       }
     },
     onDone: () => {
@@ -98,7 +94,8 @@ export function EpisodeStepClient({
   }, [selected, refreshSelected]);
 
   const writtenCount = entries.filter((e) => e.written).length;
-  const canProceed = atState !== "episode" || writtenCount >= totalEpisodes;
+  const canProceed = writtenCount > 0;
+  const isMiniSeries = totalEpisodes <= 5;
 
   const startRun = () => {
     if (running) return;
@@ -138,12 +135,26 @@ export function EpisodeStepClient({
             variant="secondary"
             disabled={!canProceed}
             onClick={() => router.push(`/studio/${projectId}/review`)}
-            title={canProceed ? "进入复盘" : "全部集数写完后可进入复盘"}
+            title={canProceed ? "进入复盘" : "至少写完 1 集后可进入复盘"}
           >
             进入复盘 <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
       </header>
+
+      {isMiniSeries && (
+        <section className="panel-2 flex items-center justify-between gap-3 p-4 text-sm">
+          <div>
+            <div className="font-medium">当前是 5 集试玩模式</div>
+            <div className="mt-1 text-[color:var(--color-muted)]">
+              建议先逐集生成并在每集完成后立即复盘，再决定是否扩展成长剧。
+            </div>
+          </div>
+          <span className="rounded-full bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs text-[color:var(--color-primary)]">
+            试玩闭环
+          </span>
+        </section>
+      )}
 
       <section className="panel grid gap-4 p-4 lg:grid-cols-[260px_1fr]">
         <div className="space-y-3">
@@ -250,6 +261,13 @@ export function EpisodeStepClient({
           </div>
         </div>
       </section>
+
+      <AgentWorkflowPanel
+        enabled={multiAgentEnabled}
+        running={running}
+        commandLabel="分集剧本"
+        events={events}
+      />
 
       <StreamingConsole
         running={running}

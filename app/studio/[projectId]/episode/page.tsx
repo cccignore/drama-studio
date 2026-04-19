@@ -77,9 +77,11 @@ export default async function EpisodePage({
     <EpisodeStepClient
       projectId={projectId}
       totalEpisodes={total}
-      currentStep={project.state.currentStep}
       entries={entries}
       initialIndex={initialEpIndex}
+      multiAgentEnabled={Boolean(
+        project.state.multiAgentEnabled && project.state.multiAgentCommands?.includes("episode")
+      )}
       initialContent={initialArtifact?.content ?? null}
     />
   );

@@ -8,7 +8,7 @@ export default function StudioListPage() {
   return (
     <DashboardShell
       title="项目列表"
-      subtitle="每个项目独立隔离状态与产物。M1 阶段仅用于 SSE 连通性验收。"
+      subtitle="每个项目独立隔离状态与产物。建议先创建一个 5 集试玩项目，再扩展到长剧。"
       nav={[
         {
           label: "项目列表",

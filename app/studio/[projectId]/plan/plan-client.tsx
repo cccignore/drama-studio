@@ -4,38 +4,59 @@ import Link from "next/link";
 import { Activity, Play, Square, ArrowRight, FileText, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { AgentWorkflowPanel } from "@/components/drama/agent-workflow-panel";
+import { PaceWaveform } from "@/components/drama/pace-waveform";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
+import { extractPlanCurve, type PlanCurvePoint } from "@/lib/drama/parsers/extract-plan-curve";
 
 export function PlanStepClient({
   projectId,
   totalEpisodes,
   startCard,
+  initialCurve,
+  multiAgentEnabled,
   initialArtifact,
 }: {
   projectId: string;
   totalEpisodes: number;
   startCard: string;
+  initialCurve: PlanCurvePoint[];
+  multiAgentEnabled: boolean;
   initialArtifact: { content: string; version: number } | null;
 }) {
   const [savedContent, setSavedContent] = React.useState<string | null>(initialArtifact?.content ?? null);
   const [canAdvance, setCanAdvance] = React.useState<boolean>(!!initialArtifact);
   const [contextOpen, setContextOpen] = React.useState(false);
+  const [curve, setCurve] = React.useState<PlanCurvePoint[]>(initialCurve);
+
+  const refreshArtifact = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/artifacts/plan`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const item = json?.data?.item ?? json?.item;
+      if (typeof item?.content === "string") {
+        setSavedContent(item.content);
+        const metaCurve = Array.isArray(item?.meta?.curve)
+          ? (item.meta.curve as PlanCurvePoint[])
+          : extractPlanCurve(item.content);
+        setCurve(metaCurve);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
 
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
     command: "plan",
-    onDone: () => {
+    onDone: async () => {
+      await refreshArtifact();
       toast.success("节奏规划已生成");
       setCanAdvance(true);
     },
   });
-
-  React.useEffect(() => {
-    if (!running && partial && events.some((e) => e.type === "done")) {
-      setSavedContent(partial);
-    }
-  }, [running, partial, events]);
 
   const displayContent = running ? partial : savedContent ?? partial;
 
@@ -93,18 +114,40 @@ export function PlanStepClient({
         )}
       </section>
 
+      <AgentWorkflowPanel
+        enabled={multiAgentEnabled}
+        running={running}
+        commandLabel="节奏规划"
+        events={events}
+      />
+
       <StreamingConsole running={running} partial={partial} events={events} error={error} />
 
       {displayContent && !running && (
-        <section className="panel p-5">
-          <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-            <FileText className="h-4 w-4 text-[color:var(--color-success)]" />
-            节奏规划
-          </div>
-          <pre className="whitespace-pre-wrap break-words rounded-md bg-[color:var(--color-surface-2)] p-4 text-[13px] leading-[1.75]">
-            {displayContent}
-          </pre>
-        </section>
+        <>
+          <section className="panel p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Activity className="h-4 w-4 text-[color:var(--color-accent)]" />
+                节奏波形
+              </div>
+              <div className="text-xs text-[color:var(--color-muted)]">
+                共 {curve.length || totalEpisodes} 个节点 · 付费卡点 {curve.filter((item) => item.paywall).length} 处
+              </div>
+            </div>
+            <PaceWaveform points={curve} />
+          </section>
+
+          <section className="panel p-5">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+              <FileText className="h-4 w-4 text-[color:var(--color-success)]" />
+              节奏规划
+            </div>
+            <pre className="whitespace-pre-wrap break-words rounded-md bg-[color:var(--color-surface-2)] p-4 text-[13px] leading-[1.75]">
+              {displayContent}
+            </pre>
+          </section>
+        </>
       )}
     </div>
   );

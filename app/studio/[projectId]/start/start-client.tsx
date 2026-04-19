@@ -38,6 +38,7 @@ export function StartStepClient({
   const [freeText, setFreeText] = React.useState(initialState.freeText ?? "");
   const [savedContent, setSavedContent] = React.useState<string | null>(initialArtifact?.content ?? null);
   const [canAdvance, setCanAdvance] = React.useState<boolean>(!!initialArtifact);
+  const isMiniSeries = totalEpisodes <= 5;
 
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
@@ -80,6 +81,20 @@ export function StartStepClient({
     });
   };
 
+  const applyMiniDemoPreset = () => {
+    setTitle("");
+    setGenre(["都市反诈"]);
+    setAudience("全年龄");
+    setTone("爽燃");
+    setEnding("HE");
+    setTotalEpisodes(5);
+    setMode("domestic");
+    setFreeText(
+      "一个退休阿姨险些掉进电诈陷阱，随后联合社区年轻人反向布局，在 5 集内完成识破、反击和收网。"
+    );
+    toast.success("已填入 5 集试玩案例");
+  };
+
   const displayContent = running ? partial : savedContent ?? partial;
 
   return (
@@ -105,6 +120,27 @@ export function StartStepClient({
       </header>
 
       <section className="panel space-y-5 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-4 py-3">
+          <div>
+            <div className="text-sm font-medium">首次使用建议先跑通 5 集试玩闭环</div>
+            <div className="mt-1 text-xs text-[color:var(--color-muted)]">
+              先用 5 集迷你剧验证立项、目录、剧本、复盘和导出，再扩展到 50-100 集。
+            </div>
+          </div>
+          <Button type="button" variant="secondary" onClick={applyMiniDemoPreset} disabled={running}>
+            一键填入 5 集试玩案例
+          </Button>
+        </div>
+
+        {isMiniSeries && (
+          <div className="rounded-md border border-[color:var(--color-primary)]/30 bg-[color:var(--color-primary)]/10 px-4 py-3 text-sm">
+            <div className="font-medium text-[color:var(--color-primary)]">当前是 5 集试玩模式</div>
+            <div className="mt-1 text-[color:var(--color-muted)]">
+              后续步骤将优先围绕“快速跑通完整闭环”来生成内容，更适合首次演示和验收。
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-3 md:grid-cols-[1fr_180px_160px]">
           <div>
             <label className="mb-1 block text-xs font-medium text-[color:var(--color-muted)]">剧名（可选，AI 会给建议）</label>

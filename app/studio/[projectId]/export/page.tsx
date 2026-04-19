@@ -5,7 +5,7 @@ import {
   getLatestArtifact,
   getReviewIndices,
 } from "@/lib/drama/artifacts";
-import { stepIndex } from "@/lib/drama/state-machine";
+import { canAccessStep } from "@/lib/drama/state-machine";
 import { extractReviewJson } from "@/lib/drama/parsers/extract-review-json";
 import { ExportStepClient, type ExportEpisodeSummary } from "./export-client";
 
@@ -19,11 +19,15 @@ export default async function ExportPage({
   const { projectId } = await params;
   const project = getProject(projectId);
   if (!project) notFound();
-  if (stepIndex(project.state.currentStep) < stepIndex("export")) {
+  const epIdxs = getEpisodeIndices(projectId);
+  if (
+    !canAccessStep("export", project.state, {
+      writtenEpisodes: epIdxs.length,
+      reviewedEpisodes: getReviewIndices(projectId).length,
+    })
+  ) {
     redirect(`/studio/${projectId}/${project.state.currentStep}`);
   }
-
-  const epIdxs = getEpisodeIndices(projectId);
   const reviewed = new Set(getReviewIndices(projectId));
   const summaries: ExportEpisodeSummary[] = [];
   let totalChars = 0;

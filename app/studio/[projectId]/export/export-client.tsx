@@ -34,6 +34,7 @@ export function ExportStepClient({
   stats,
 }: Props) {
   const episodes = summaries.map((s) => s.index);
+  const isMiniSeries = totalEpisodes <= 5;
   return (
     <div className="space-y-6">
       <header className="flex items-start justify-between gap-4">
@@ -53,6 +54,20 @@ export function ExportStepClient({
           返回复盘
         </Link>
       </header>
+
+      {isMiniSeries && (
+        <section className="panel-2 flex items-center justify-between gap-3 p-4 text-sm">
+          <div>
+            <div className="font-medium">5 集试玩模式已进入导出阶段</div>
+            <div className="mt-1 text-[color:var(--color-muted)]">
+              即使只完成了部分复盘，也可以先导出 Markdown 或 Word 版本进行演示。
+            </div>
+          </div>
+          <span className="rounded-full bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs text-[color:var(--color-primary)]">
+            轻量交付
+          </span>
+        </section>
+      )}
 
       <section className="grid gap-4 md:grid-cols-4">
         <Metric label="集数进度" value={`${summaries.length} / ${totalEpisodes}`} />

@@ -5,7 +5,7 @@ import {
   getLatestArtifact,
   getReviewIndices,
 } from "@/lib/drama/artifacts";
-import { stepIndex } from "@/lib/drama/state-machine";
+import { canAccessStep, stepIndex } from "@/lib/drama/state-machine";
 import {
   extractReviewJson,
   type ReviewResult,
@@ -22,11 +22,16 @@ export default async function ReviewPage({
   const { projectId } = await params;
   const project = getProject(projectId);
   if (!project) notFound();
-  if (stepIndex(project.state.currentStep) < stepIndex("review")) {
-    redirect(`/studio/${projectId}/${project.state.currentStep}`);
-  }
   const epIdxs = getEpisodeIndices(projectId);
   const reviewed = new Set(getReviewIndices(projectId));
+  if (
+    !canAccessStep("review", project.state, {
+      writtenEpisodes: epIdxs.length,
+      reviewedEpisodes: reviewed.size,
+    })
+  ) {
+    redirect(`/studio/${projectId}/${project.state.currentStep}`);
+  }
 
   const entries: ReviewEntry[] = [];
   for (const idx of epIdxs) {
@@ -55,7 +60,6 @@ export default async function ReviewPage({
     <ReviewStepClient
       projectId={projectId}
       totalEpisodes={project.state.totalEpisodes}
-      currentStep={project.state.currentStep}
       entries={entries}
       initialIndex={initialIndex}
     />

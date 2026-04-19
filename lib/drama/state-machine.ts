@@ -32,6 +32,11 @@ export const COMMAND_TO_STEP: Record<string, DramaStep> = {
   export: "export",
 };
 
+export interface StepProgressContext {
+  writtenEpisodes?: number;
+  reviewedEpisodes?: number;
+}
+
 export function stepIndex(step: DramaStep): number {
   return STEP_ORDER.indexOf(step);
 }
@@ -41,10 +46,50 @@ export function nextStep(step: DramaStep): DramaStep {
   return STEP_ORDER[Math.min(i + 1, STEP_ORDER.length - 1)];
 }
 
-export function canRunCommand(command: string, state: DramaState): { ok: true } | { ok: false; reason: string } {
+export function deriveMaxAccessibleStep(
+  state: DramaState,
+  ctx: StepProgressContext = {}
+): DramaStep {
+  if ((ctx.writtenEpisodes ?? 0) > 0 && stepIndex(state.currentStep) < stepIndex("export")) {
+    return "export";
+  }
+  return state.currentStep;
+}
+
+export function canAccessStep(
+  step: DramaStep,
+  state: DramaState,
+  ctx: StepProgressContext = {}
+): boolean {
+  return stepIndex(step) <= stepIndex(deriveMaxAccessibleStep(state, ctx));
+}
+
+export function promoteStep(state: DramaState, target: DramaStep): DramaState {
+  if (stepIndex(target) <= stepIndex(state.currentStep)) return state;
+  return { ...state, currentStep: target };
+}
+
+export function canRunCommand(
+  command: string,
+  state: DramaState,
+  ctx: StepProgressContext = {}
+): { ok: true } | { ok: false; reason: string } {
   if (command === "ping") return { ok: true };
+  if (command === "overseas") {
+    return stepIndex(state.currentStep) >= stepIndex("start")
+      ? { ok: true }
+      : { ok: false, reason: "请先完成立项后再切换出海模式" };
+  }
+  if (command === "compliance") {
+    return (ctx.writtenEpisodes ?? 0) > 0
+      ? { ok: true }
+      : { ok: false, reason: "请至少先写出 1 集剧本后再做合规审查" };
+  }
   const target = COMMAND_TO_STEP[command];
   if (!target) return { ok: false, reason: `未知命令：${command}` };
+  if (command === "review" && (ctx.writtenEpisodes ?? 0) > 0) {
+    return { ok: true };
+  }
   const required = stepIndex(target);
   const current = stepIndex(state.currentStep);
   if (current < required) {

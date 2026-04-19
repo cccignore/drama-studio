@@ -14,6 +14,7 @@ export interface StartArgs {
 }
 
 export function buildStartMessages(state: DramaState, args: StartArgs, refs: string): LLMMessage[] {
+  const mode = args.mode ?? state.mode;
   const context = contextBlock({
     ...state,
     dramaTitle: args.dramaTitle || state.dramaTitle,
@@ -22,7 +23,7 @@ export function buildStartMessages(state: DramaState, args: StartArgs, refs: str
     tone: (args.tone as DramaState["tone"]) ?? state.tone,
     ending: (args.ending as DramaState["ending"]) ?? state.ending,
     totalEpisodes: args.totalEpisodes ?? state.totalEpisodes,
-    mode: args.mode ?? state.mode,
+    mode,
   });
 
   const userIdea = (args.freeText ?? "").trim() || "（用户未提供额外想法，请你基于以上题材与受众自行发挥。）";
@@ -68,6 +69,8 @@ export function buildStartMessages(state: DramaState, args: StartArgs, refs: str
     "要求：",
     "1) 如果用户提供的想法和题材/受众冲突，以「题材与受众」为主轴，**温和地**调整想法方向，并在对应位置用一句「调整说明」体现。",
     "2) 所有条目必须具体、可落地，禁止「根据需要」这种空话。",
+    mode === "overseas"
+      ? "3) 当前是出海模式：设定、职业、爽点和关系冲突要尽量国际化，避免高度依赖本土语境才能理解。必要时在合适位置补充英文剧名或海外平台对标。": "3) 当前是国内模式：优先贴合中文短剧用户的情绪节奏与付费卡点。",
   ].join("\n");
 
   return [

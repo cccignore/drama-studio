@@ -1,5 +1,17 @@
 export type LLMProtocol = "openai" | "anthropic";
 
+export type ProjectLLMCommand =
+  | "default"
+  | "start"
+  | "plan"
+  | "characters"
+  | "outline"
+  | "episode"
+  | "review"
+  | "export"
+  | "overseas"
+  | "compliance";
+
 export interface LLMConfig {
   id: string;
   name: string;

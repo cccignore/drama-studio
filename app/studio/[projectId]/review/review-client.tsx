@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import { ReviewRadarChart } from "@/components/drama/review-radar-chart";
+import { ReviewCompareRadar } from "@/components/drama/review-compare-radar";
 import { ReviewIssueList } from "@/components/drama/review-issue-list";
 import {
   extractReviewJson,
@@ -31,7 +32,6 @@ export interface ReviewEntry {
 interface Props {
   projectId: string;
   totalEpisodes: number;
-  currentStep: string;
   entries: ReviewEntry[];
   initialIndex: number;
 }
@@ -39,7 +39,6 @@ interface Props {
 export function ReviewStepClient({
   projectId,
   totalEpisodes,
-  currentStep,
   entries: initialEntries,
   initialIndex,
 }: Props) {
@@ -51,7 +50,9 @@ export function ReviewStepClient({
   const [rangeTo, setRangeTo] = React.useState<number>(
     initialEntries[initialEntries.length - 1]?.index ?? 1
   );
-  const [atState, setAtState] = React.useState(currentStep);
+  const [compareIds, setCompareIds] = React.useState<number[]>(() =>
+    initialEntries.filter((entry) => entry.review).slice(0, 3).map((entry) => entry.index)
+  );
 
   const refreshEntry = React.useCallback(
     async (epIdx: number) => {
@@ -83,16 +84,20 @@ export function ReviewStepClient({
       if (ev.type === "artifact" && typeof ev.episode === "number") {
         refreshEntry(ev.episode as number);
       }
-      if (ev.type === "state" && ev.state && typeof ev.state === "object") {
-        const s = ev.state as { currentStep?: string };
-        if (s.currentStep) setAtState(s.currentStep);
-      }
     },
     onDone: () => toast.success("复盘完成"),
   });
 
   const reviewedCount = entries.filter((e) => e.reviewed).length;
-  const canProceed = atState !== "review" || reviewedCount >= totalEpisodes;
+  const canProceed = entries.length > 0;
+  const isMiniSeries = totalEpisodes <= 5;
+  const comparableEntries = entries.filter((entry) => entry.review);
+
+  React.useEffect(() => {
+    if (compareIds.length > 0) return;
+    const defaults = comparableEntries.slice(0, 3).map((entry) => entry.index);
+    if (defaults.length > 0) setCompareIds(defaults);
+  }, [comparableEntries, compareIds.length]);
 
   const startRun = () => {
     if (running) return;
@@ -102,6 +107,19 @@ export function ReviewStepClient({
   };
 
   const selectedEntry = entries.find((e) => e.index === selected) ?? null;
+  const compareEntries = comparableEntries
+    .filter((entry) => compareIds.includes(entry.index) && entry.review)
+    .map((entry) => ({
+      index: entry.index,
+      scores: entry.review!.scores,
+    }));
+
+  const toggleCompare = (episodeIndex: number) => {
+    setCompareIds((prev) => {
+      if (prev.includes(episodeIndex)) return prev.filter((item) => item !== episodeIndex);
+      return [...prev.slice(-2), episodeIndex];
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -126,11 +144,26 @@ export function ReviewStepClient({
             variant="secondary"
             disabled={!canProceed}
             onClick={() => router.push(`/studio/${projectId}/export`)}
+            title={canProceed ? "进入导出" : "至少写完 1 集后可进入导出"}
           >
             进入导出 <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
       </header>
+
+      {isMiniSeries && (
+        <section className="panel-2 flex items-center justify-between gap-3 p-4 text-sm">
+          <div>
+            <div className="font-medium">5 集试玩模式建议</div>
+            <div className="mt-1 text-[color:var(--color-muted)]">
+              不必等全部复盘完成再导出。确认关键问题后，可以先导出当前版本继续演示。
+            </div>
+          </div>
+          <span className="rounded-full bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs text-[color:var(--color-primary)]">
+            可部分导出
+          </span>
+        </section>
+      )}
 
       <section className="panel grid gap-4 p-4 lg:grid-cols-[260px_1fr]">
         <div className="space-y-3">
@@ -230,6 +263,37 @@ export function ReviewStepClient({
         error={error}
         heightClass="max-h-[380px]"
       />
+
+      <section className="panel p-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">多集雷达对比</h3>
+            <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+              最多选择 3 集已复盘剧本，横向比较节奏、爽点、台词、格式和一致性。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {comparableEntries.map((entry) => {
+              const active = compareIds.includes(entry.index);
+              return (
+                <button
+                  key={entry.index}
+                  type="button"
+                  onClick={() => toggleCompare(entry.index)}
+                  className={
+                    active
+                      ? "rounded-full border border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs text-[color:var(--color-primary)]"
+                      : "rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 py-1 text-xs text-[color:var(--color-muted)]"
+                  }
+                >
+                  第 {entry.index} 集
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <ReviewCompareRadar entries={compareEntries} />
+      </section>
 
       {selectedEntry && (
         <section className="panel grid gap-5 p-5 lg:grid-cols-[minmax(0,300px)_1fr]">

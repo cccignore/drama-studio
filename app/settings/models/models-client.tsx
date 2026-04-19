@@ -1,11 +1,12 @@
 "use client";
 import * as React from "react";
 import { toast } from "sonner";
-import { CheckCircle2, CircleAlert, Loader2, Plus, Star, Trash2, Zap } from "lucide-react";
+import { BrainCircuit, CheckCircle2, CircleAlert, Loader2, Plus, Star, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { ROUTING_PRESETS } from "@/lib/llm/presets";
 import {
   Dialog,
   DialogContent,
@@ -131,6 +132,29 @@ export function ModelsClient() {
 
   return (
     <div className="mx-auto max-w-4xl">
+      <div className="panel-2 mb-4 p-4">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <BrainCircuit className="h-4 w-4 text-[color:var(--color-primary)]" />
+          按命令路由模型
+        </div>
+        <p className="mt-2 text-sm text-[color:var(--color-muted)]">
+          模型设置页负责维护可用 LLM；真正的按命令绑定与 multi-agent 开关在项目页右上角“项目增强”中按项目配置。
+        </p>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          {ROUTING_PRESETS.map((preset) => (
+            <div
+              key={preset.id}
+              className="rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3"
+            >
+              <div className="text-sm font-medium">{preset.name}</div>
+              <div className="mt-1 text-xs text-[color:var(--color-muted)]">
+                {preset.description}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="mb-4 flex items-center justify-between">
         <div className="text-xs text-[color:var(--color-muted)]">
           {items.length > 0 ? `共 ${items.length} 个配置` : "尚未添加任何配置"}

@@ -29,6 +29,7 @@ export function OutlineStepClient({
 }) {
   const [savedContent, setSavedContent] = React.useState<string | null>(initialArtifact?.content ?? null);
   const [tab, setTab] = React.useState<"tree" | "raw">("tree");
+  const isMiniSeries = totalEpisodes <= 5;
 
   const router = useRouter();
 
@@ -87,6 +88,20 @@ export function OutlineStepClient({
           </Button>
         </div>
       </header>
+
+      {isMiniSeries && (
+        <section className="panel-2 flex items-center justify-between gap-3 p-4 text-sm">
+          <div>
+            <div className="font-medium">当前是 5 集试玩模式</div>
+            <div className="mt-1 text-[color:var(--color-muted)]">
+              请重点检查每集标题、钩子和结尾是否足够清晰，确认后就能直接进入写作闭环。
+            </div>
+          </div>
+          <span className="rounded-full bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs text-[color:var(--color-primary)]">
+            快速通读
+          </span>
+        </section>
+      )}
 
       <section className="panel flex items-center justify-between gap-2 p-4">
         <div className="text-xs text-[color:var(--color-muted)]">

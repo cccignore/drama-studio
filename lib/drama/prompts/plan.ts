@@ -2,7 +2,17 @@ import type { DramaState } from "../types";
 import type { LLMMessage } from "../../llm/types";
 import { SYSTEM_PERSONA, contextBlock, refsBlock } from "./_shared";
 
-export function buildPlanMessages(state: DramaState, startCard: string, refs: string): LLMMessage[] {
+export interface PlanAgentContext {
+  plannerBrief?: string;
+  criticNotes?: string;
+}
+
+export function buildPlanMessages(
+  state: DramaState,
+  startCard: string,
+  refs: string,
+  agentContext?: PlanAgentContext
+): LLMMessage[] {
   const user = [
     "【任务】基于已完成的立项卡，给出本剧的**节奏与付费规划**。",
     "",
@@ -11,6 +21,12 @@ export function buildPlanMessages(state: DramaState, startCard: string, refs: st
     "",
     "【立项卡全文】",
     startCard || "（尚未生成立项卡）",
+    "",
+    agentContext?.plannerBrief ? "【Planner 节奏骨架草案】" : "",
+    agentContext?.plannerBrief ?? "",
+    "",
+    agentContext?.criticNotes ? "【Critic 风险修正意见】" : "",
+    agentContext?.criticNotes ?? "",
     "",
     refsBlock(refs),
     "",
@@ -37,10 +53,19 @@ export function buildPlanMessages(state: DramaState, startCard: string, refs: st
     "## 四、节奏自检",
     "用 3-5 条要点，说明本规划如何规避「信息真空 / 爽点间隔过长 / 虎头蛇尾」等风险。",
     "",
+    "## 五、节奏波形数据",
+    "严格输出 Markdown 表格，覆盖 1 到总集数的每一集，格式如下：",
+    "| 集数 | 情绪强度(1-5) | 爽点释放(1-5) | 钩子强度(1-5) | 付费卡点 | 备注 |",
+    "|------|---------------|---------------|---------------|----------|------|",
+    "| 1 | 4 | 3 | 5 | 否 | 开场困境与身份反差 |",
+    "",
     "要求：",
     "1) 起势段集数占比约 15%、攀升段 30%、风暴段 35%、决战段 20%。允许 ±1 集误差。",
     "2) 首个付费卡点必须落在起势段结尾或攀升段前两集。",
     "3) 每个爽点/卡点必须给出具体集号，禁止「大约第 X 集」。",
+    "4) 第五部分必须完整覆盖 1 到总集数的所有集数，每集一行；数值只能填 1-5 的整数。",
+    state.mode === "overseas"
+      ? "5) 当前是出海模式：节奏应更强调开场 5 秒强钩子、关系反差与文化上更普适的冲突。": "5) 当前是国内模式：节奏应兼顾爽点堆叠和付费卡点密度。",
   ].join("\n");
 
   return [

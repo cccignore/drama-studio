@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DramaStep } from "@/lib/drama/types";
@@ -11,20 +12,26 @@ const VISIBLE: DramaStep[] = ["start", "plan", "characters", "outline", "episode
 export function StepProgress({
   projectId,
   currentStep,
-  activeStep,
+  maxAccessibleStep,
 }: {
   projectId: string;
   currentStep: DramaStep;
-  activeStep?: DramaStep;
+  maxAccessibleStep?: DramaStep;
 }) {
+  const pathname = usePathname();
   const currentIdx = stepIndex(currentStep);
+  const activeStep = React.useMemo<DramaStep | undefined>(() => {
+    const hit = VISIBLE.find((step) => pathname?.endsWith(`/${step}`));
+    return hit;
+  }, [pathname]);
+  const accessIdx = stepIndex(maxAccessibleStep ?? currentStep);
   return (
     <div className="panel flex items-center gap-1 overflow-x-auto p-2">
       {VISIBLE.map((step, i) => {
         const idx = stepIndex(step);
         const done = idx < currentIdx;
         const here = step === activeStep;
-        const reachable = idx <= currentIdx;
+        const reachable = idx <= accessIdx;
         const body = (
           <>
             <span

@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { getDb } from "../db/sqlite";
 import { encrypt, decrypt, maskKey } from "../crypto/aes";
-import type { LLMConfig, LLMConfigRow, LLMProtocol } from "./types";
+import type { LLMConfig, LLMConfigRow, LLMProtocol, ProjectLLMCommand } from "./types";
 
 function rowToConfig(row: LLMConfigRow, options: { includePlainKey?: boolean } = {}): LLMConfig {
   const apiKey = row.api_key ? decrypt(row.api_key) : "";
@@ -128,5 +128,70 @@ export function updateLLMConfig(id: string, input: UpdateLLMConfigInput): LLMCon
 export function deleteLLMConfig(id: string): boolean {
   const db = getDb();
   const result = db.prepare(`DELETE FROM llm_configs WHERE id = ?`).run(id);
+  return result.changes > 0;
+}
+
+export interface ProjectLLMBinding {
+  projectId: string;
+  command: ProjectLLMCommand;
+  configId: string;
+  config: LLMConfig | null;
+}
+
+const VALID_COMMANDS: ProjectLLMCommand[] = [
+  "default",
+  "start",
+  "plan",
+  "characters",
+  "outline",
+  "episode",
+  "review",
+  "export",
+  "overseas",
+  "compliance",
+];
+
+export function isProjectLLMCommand(input: string): input is ProjectLLMCommand {
+  return VALID_COMMANDS.includes(input as ProjectLLMCommand);
+}
+
+export function listProjectLLMBindings(projectId: string): ProjectLLMBinding[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT project_id, command, config_id FROM project_llm_bindings WHERE project_id = ? ORDER BY command ASC`
+    )
+    .all(projectId) as Array<{ project_id: string; command: string; config_id: string }>;
+  return rows.map((row) => ({
+    projectId: row.project_id,
+    command: row.command as ProjectLLMCommand,
+    configId: row.config_id,
+    config: getLLMConfig(row.config_id),
+  }));
+}
+
+export function upsertProjectLLMBinding(
+  projectId: string,
+  command: ProjectLLMCommand,
+  configId: string
+): ProjectLLMBinding {
+  getDb()
+    .prepare(
+      `INSERT INTO project_llm_bindings (project_id, command, config_id)
+       VALUES (?, ?, ?)
+       ON CONFLICT(project_id, command) DO UPDATE SET config_id = excluded.config_id`
+    )
+    .run(projectId, command, configId);
+  return {
+    projectId,
+    command,
+    configId,
+    config: getLLMConfig(configId),
+  };
+}
+
+export function deleteProjectLLMBinding(projectId: string, command: ProjectLLMCommand): boolean {
+  const result = getDb()
+    .prepare(`DELETE FROM project_llm_bindings WHERE project_id = ? AND command = ?`)
+    .run(projectId, command);
   return result.changes > 0;
 }

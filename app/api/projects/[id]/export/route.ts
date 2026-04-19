@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { AppError, toJsonError } from "@/lib/api/errors";
 import { getProject, updateProject, logEvent } from "@/lib/drama/store";
-import { advanceAfter } from "@/lib/drama/state-machine";
+import { advanceAfter, promoteStep } from "@/lib/drama/state-machine";
 import { collectExportBundle } from "@/lib/drama/export/collect";
 import { renderProjectMarkdown, renderEpisodeMarkdown } from "@/lib/drama/export/md";
 import { buildEpisodeDocx, buildProjectDocx } from "@/lib/drama/export/docx";
@@ -57,11 +57,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       ext = "zip";
     }
 
-    if (!episodeIndex && format === "zip") {
+    if (!episodeIndex) {
       const fresh = getProject(id);
-      if (fresh && fresh.state.currentStep === "export") {
-        const nextState = advanceAfter("export", fresh.state);
-        updateProject(id, { state: nextState });
+      if (fresh && fresh.state.currentStep !== "done") {
+        const promoted = promoteStep(fresh.state, "export");
+        updateProject(id, { state: promoted });
+        if (format === "zip") {
+          const nextState = advanceAfter("export", promoted);
+          updateProject(id, { state: nextState });
+        }
       }
     }
     logEvent(id, "export", "done", { format, episodeIndex: episodeIndex ?? null });
