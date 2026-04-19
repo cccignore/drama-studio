@@ -8,6 +8,8 @@
 
 当前交付以 [`../interview-task.md`](../interview-task.md) 为准。
 
+> 面向创作者的极简使用指南，请看 [USAGE.md](./USAGE.md)。
+
 ---
 
 ## 功能清单
