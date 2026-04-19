@@ -25,6 +25,9 @@ export const GENRE_OPTIONS: GenreOption[] = [
   { id: "末日重生", title: "末日重生", subtitle: "末世降临 · 求生逆袭", audience: "男频 20-35", emoji: "☢️" },
   { id: "软科幻", title: "软科幻", subtitle: "轻设定下的冒险/情感", audience: "男频 20-35", emoji: "🛸" },
   { id: "喜剧", title: "喜剧", subtitle: "笑点密集的轻松故事", audience: "全年龄", emoji: "🎭" },
+  { id: "都市反诈", title: "都市反诈", subtitle: "普通人智斗电诈窝点", audience: "全年龄 40+", emoji: "🛡️" },
+  { id: "职场逆袭", title: "职场逆袭", subtitle: "底层打工人翻身打脸", audience: "女频 22-35", emoji: "💼" },
+  { id: "校园青春", title: "校园青春", subtitle: "校园初恋 · 热血成长", audience: "全年龄 16-25", emoji: "🎒" },
 ];
 
 export function GenrePicker({

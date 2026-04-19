@@ -1,6 +1,16 @@
 "use client";
 import * as React from "react";
-import { ListOrdered, Play, Square, FileText, LayoutList, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  ArrowRight,
+  ListOrdered,
+  Play,
+  Square,
+  FileText,
+  LayoutList,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
@@ -19,6 +29,8 @@ export function OutlineStepClient({
 }) {
   const [savedContent, setSavedContent] = React.useState<string | null>(initialArtifact?.content ?? null);
   const [tab, setTab] = React.useState<"tree" | "raw">("tree");
+
+  const router = useRouter();
 
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
@@ -58,9 +70,21 @@ export function OutlineStepClient({
             产出完整的 {totalEpisodes} 集目录，标记 🔥 大爽点与 💰 付费卡点。
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-[color:var(--color-muted)]">
-          <Sparkles className="h-4 w-4 text-[color:var(--color-success)]" />
-          M2 里程碑：走到这里即证明端到端闭环成立
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/studio/${projectId}/characters`}
+            className="text-xs text-[color:var(--color-muted)] underline-offset-4 hover:underline"
+          >
+            返回角色
+          </Link>
+          <Button
+            variant="secondary"
+            disabled={!savedContent || running}
+            onClick={() => router.push(`/studio/${projectId}/episode`)}
+            title={savedContent ? "进入剧本写作" : "请先生成分集目录"}
+          >
+            下一步：剧本 <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 

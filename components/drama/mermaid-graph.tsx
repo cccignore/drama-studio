@@ -1,13 +1,15 @@
 "use client";
 import * as React from "react";
+import { sanitizeMermaid } from "@/lib/drama/parsers/sanitize-mermaid";
 
 export function MermaidGraph({ code }: { code: string }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
+  const safeCode = React.useMemo(() => sanitizeMermaid(code), [code]);
 
   React.useEffect(() => {
     let cancelled = false;
-    if (!code) return;
+    if (!safeCode) return;
     (async () => {
       try {
         const mod = await import("mermaid");
@@ -25,7 +27,13 @@ export function MermaidGraph({ code }: { code: string }) {
           },
         });
         const id = `m${Math.random().toString(36).slice(2, 9)}`;
-        const { svg } = await mermaid.render(id, code);
+        let svg = "";
+        try {
+          ({ svg } = await mermaid.render(id, safeCode));
+        } catch {
+          // fallback to raw original if sanitizer over-corrected
+          ({ svg } = await mermaid.render(`${id}r`, code));
+        }
         if (cancelled) return;
         if (ref.current) {
           ref.current.innerHTML = svg;
@@ -38,7 +46,7 @@ export function MermaidGraph({ code }: { code: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, safeCode]);
 
   if (!code) return null;
   if (err) {

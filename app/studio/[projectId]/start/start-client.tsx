@@ -118,11 +118,14 @@ export function StartStepClient({
             <label className="mb-1 block text-xs font-medium text-[color:var(--color-muted)]">总集数</label>
             <Input
               type="number"
-              min={30}
+              min={3}
               max={120}
               value={totalEpisodes}
-              onChange={(e) => setTotalEpisodes(Math.max(20, Math.min(120, parseInt(e.target.value) || 60)))}
+              onChange={(e) => setTotalEpisodes(Math.max(3, Math.min(120, parseInt(e.target.value) || 60)))}
             />
+            <p className="mt-1 text-[10px] text-[color:var(--color-muted)]/80">
+              生产建议 50–100，试用可填 5
+            </p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[color:var(--color-muted)]">市场</label>

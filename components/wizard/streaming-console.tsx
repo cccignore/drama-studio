@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Activity, ChevronRight } from "lucide-react";
+import { Activity, ArrowDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { SSEEvent } from "@/hooks/use-streaming-command";
@@ -10,7 +10,7 @@ export function StreamingConsole({
   partial,
   events,
   error,
-  heightClass = "max-h-[520px]",
+  heightClass = "h-[420px]",
 }: {
   running: boolean;
   partial: string;
@@ -19,13 +19,24 @@ export function StreamingConsole({
   heightClass?: string;
 }) {
   const [open, setOpen] = React.useState(true);
+  const [autoFollow, setAutoFollow] = React.useState(true);
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || !autoFollow) return;
     el.scrollTop = el.scrollHeight;
-  }, [partial, events.length]);
+  }, [partial, events.length, autoFollow]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (atBottom !== autoFollow) setAutoFollow(atBottom);
+  };
+
+  const lastStage = [...events].reverse().find((e) => e.type === "progress");
+  const stageLabel = lastStage ? (lastStage.message as string) || (lastStage.stage as string) : null;
 
   return (
     <div className="panel overflow-hidden">
@@ -43,66 +54,52 @@ export function StreamingConsole({
           <span className="text-xs text-[color:var(--color-muted)]">
             {events.length} 事件 · {partial.length.toLocaleString()} 字
           </span>
+          {stageLabel && running && (
+            <span className="hidden truncate text-xs text-[color:var(--color-muted)] md:inline-block">
+              · {stageLabel}
+            </span>
+          )}
         </div>
         <ChevronRight className={cn("h-4 w-4 transition-transform", open && "rotate-90")} />
       </button>
 
       {open && (
-        <div className={cn("grid gap-0 md:grid-cols-[1fr_280px]", heightClass, "overflow-hidden")}>
-          <div ref={scrollRef} className="overflow-y-auto border-r border-[color:var(--color-border)] p-4 text-sm leading-relaxed">
+        <div className={cn("relative", heightClass)}>
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="h-full overflow-y-auto p-4"
+          >
             {partial ? (
-              <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-[1.7]">{partial}</pre>
+              <pre className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-[1.75]">
+                {partial}
+              </pre>
             ) : (
               <div className="flex h-full min-h-[200px] items-center justify-center text-xs text-[color:var(--color-muted)]">
                 {running ? "等待首个增量 …" : "尚未开始"}
               </div>
             )}
           </div>
-          <div className="overflow-y-auto bg-[color:var(--color-surface-2)]/40 p-3 font-mono text-[11px]">
-            {events.length === 0 ? (
-              <div className="text-[color:var(--color-muted)]">事件流将在此显示</div>
-            ) : (
-              <div className="space-y-1">
-                {events.map((ev, i) => (
-                  <div key={i} className="flex gap-2">
-                    <span className={cn("shrink-0", eventColor(ev.type))}>{ev.type}</span>
-                    <span className="flex-1 truncate text-[color:var(--color-muted)]">{summarize(ev)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {running && !autoFollow && (
+            <button
+              type="button"
+              onClick={() => {
+                setAutoFollow(true);
+                const el = scrollRef.current;
+                if (el) el.scrollTop = el.scrollHeight;
+              }}
+              className="absolute bottom-3 right-4 flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-background-2)] px-3 py-1 text-xs text-[color:var(--color-foreground)] shadow-lg hover:border-[color:var(--color-primary)]/60"
+            >
+              <ArrowDown className="h-3 w-3" /> 跟随最新
+            </button>
+          )}
+          {error && (
+            <div className="absolute bottom-0 left-0 right-0 border-t border-red-500/40 bg-red-500/10 px-4 py-2 text-[12px] text-red-200">
+              {error}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
-}
-
-function eventColor(t: string) {
-  switch (t) {
-    case "start":
-      return "text-[color:var(--color-primary)]";
-    case "progress":
-      return "text-[color:var(--color-accent)]";
-    case "partial":
-      return "text-[color:var(--color-foreground)]/70";
-    case "usage":
-    case "state":
-      return "text-[color:var(--color-muted)]";
-    case "artifact":
-    case "done":
-      return "text-[color:var(--color-success)]";
-    case "error":
-      return "text-[color:var(--color-danger)]";
-    default:
-      return "text-[color:var(--color-muted)]";
-  }
-}
-
-function summarize(ev: SSEEvent): string {
-  const { type, ...rest } = ev;
-  void type;
-  if (typeof rest.text === "string") return `"${rest.text.slice(0, 40)}"`;
-  const s = JSON.stringify(rest);
-  return s.length > 100 ? s.slice(0, 100) + "…" : s;
 }
