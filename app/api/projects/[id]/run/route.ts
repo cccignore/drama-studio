@@ -9,13 +9,27 @@ import { streamLLM } from "@/lib/llm/stream";
 import { getLLMConfig } from "@/lib/llm/store";
 import { canRunCommand, advanceAfter, COMMAND_TO_STEP } from "@/lib/drama/state-machine";
 import { loadRefsForCommand } from "@/lib/drama/references";
-import { getLatestArtifact, saveArtifact } from "@/lib/drama/artifacts";
+import {
+  getEpisodeIndices,
+  getLatestArtifact,
+  getReviewIndices,
+  saveArtifact,
+} from "@/lib/drama/artifacts";
 import { buildStartMessages, type StartArgs } from "@/lib/drama/prompts/start";
 import { buildPlanMessages } from "@/lib/drama/prompts/plan";
 import { buildCharactersMessages } from "@/lib/drama/prompts/characters";
 import { buildOutlineMessages } from "@/lib/drama/prompts/outline";
+import { buildEpisodeMessages } from "@/lib/drama/prompts/episode";
+import { buildReviewMessages } from "@/lib/drama/prompts/review";
 import { extractMermaid } from "@/lib/drama/parsers/extract-mermaid";
 import { parseDirectory } from "@/lib/drama/parsers/extract-directory";
+import { extractEpisodeOutline } from "@/lib/drama/parsers/extract-episode-outline";
+import {
+  extractEpisodeTail,
+  parseScreenplay,
+  summarizeScreenplay,
+} from "@/lib/drama/parsers/screenplay";
+import { extractReviewJson } from "@/lib/drama/parsers/extract-review-json";
 import type { Project } from "@/lib/drama/types";
 import type { LLMConfig, LLMMessage } from "@/lib/llm/types";
 
@@ -79,6 +93,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             await runCharacters(ctx);
           } else if (command === "outline") {
             await runOutline(ctx);
+          } else if (command === "episode") {
+            await runEpisode(ctx);
+          } else if (command === "review") {
+            await runReview(ctx);
           } else {
             send({
               type: "error",
@@ -88,7 +106,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             return;
           }
 
-          if (command !== "ping" && COMMAND_TO_STEP[command]) {
+          // episode / review handle state advancement themselves (multi-run commands)
+          if (
+            command !== "ping" &&
+            command !== "episode" &&
+            command !== "review" &&
+            COMMAND_TO_STEP[command]
+          ) {
             const fresh = getProject(id);
             if (fresh) {
               const nextState = advanceAfter(command, fresh.state);
@@ -270,4 +294,241 @@ async function runOutline({ cfg, project, send, signal }: RunCtx) {
     length: content.length,
     total: parsed.total,
   });
+}
+
+function resolveEpisodeTargets(args: Record<string, unknown>, totalExpected: number, existing: number[]): number[] {
+  const total = Math.max(1, totalExpected);
+  const mode = (args.mode as string | undefined) ?? "single";
+  if (mode === "range") {
+    const from = Math.max(1, Number(args.from) || 1);
+    const to = Math.min(total, Number(args.to) || from);
+    const list: number[] = [];
+    for (let i = from; i <= to; i++) list.push(i);
+    return list;
+  }
+  if (mode === "next") {
+    const nextIdx = (existing.length ? Math.max(...existing) : 0) + 1;
+    if (nextIdx > total) return [];
+    return [nextIdx];
+  }
+  // single
+  const idx = Number(args.index);
+  if (!Number.isFinite(idx) || idx < 1) throw new Error("episode 参数缺少 index");
+  if (idx > total) throw new Error(`index 超出总集数 ${total}`);
+  return [idx];
+}
+
+async function runEpisode(ctx: RunCtx) {
+  const { cfg, project, args, send, signal } = ctx;
+  const outline = getLatestArtifact(project.id, "outline");
+  const plan = getLatestArtifact(project.id, "plan");
+  const characters = getLatestArtifact(project.id, "characters");
+  if (!outline || !plan || !characters) throw new Error("请先完成 outline / plan / characters");
+
+  const totalExpected = project.state.totalEpisodes || 0;
+  const existing = getEpisodeIndices(project.id);
+  const targets = resolveEpisodeTargets(args, totalExpected, existing);
+  if (targets.length === 0) {
+    send({ type: "progress", stage: "noop", message: "没有可写的集数（已全部完成）" });
+    return;
+  }
+
+  const refs = loadRefsForCommand("episode");
+  const rewriteHint = typeof args.rewriteHint === "string" ? (args.rewriteHint as string) : undefined;
+
+  for (const epIdx of targets) {
+    if (signal.aborted) throw new Error("已取消");
+    const epOutline = extractEpisodeOutline(outline.content, epIdx);
+    if (!epOutline) {
+      send({ type: "progress", stage: "skip", message: `第 ${epIdx} 集目录条目缺失，跳过` });
+      continue;
+    }
+    const prev = epIdx > 1 ? getLatestArtifact(project.id, `episode-${epIdx - 1}`) : null;
+    const prevTail = prev ? extractEpisodeTail(prev.content, 800) : undefined;
+
+    send({
+      type: "progress",
+      stage: "calling-llm",
+      message: `正在写第 ${epIdx} 集（${cfg.name}）…`,
+      episode: epIdx,
+    });
+
+    const messages = buildEpisodeMessages(
+      project.state,
+      {
+        episodeIndex: epIdx,
+        episodeOutline: epOutline,
+        planSummary: plan.content,
+        charactersSummary: characters.content,
+        prevEpisodeTail: prevTail,
+        rewriteHint,
+      },
+      refs
+    );
+    const content = await streamAndCollect(
+      cfg,
+      messages,
+      { temperature: 0.8, maxTokens: 3200, signal },
+      send
+    );
+    const ast = parseScreenplay(content);
+    const stats = summarizeScreenplay(ast);
+    const artifact = saveArtifact({
+      projectId: project.id,
+      name: `episode-${epIdx}`,
+      content,
+      meta: {
+        episodeIndex: epIdx,
+        title: ast.title,
+        closed: ast.closed,
+        ...stats,
+      },
+    });
+    send({
+      type: "artifact",
+      name: `episode-${epIdx}`,
+      version: artifact.version,
+      length: content.length,
+      episode: epIdx,
+      stats,
+    });
+  }
+
+  const after = getEpisodeIndices(project.id);
+  const fresh = getProject(project.id);
+  if (fresh && totalExpected && after.length >= totalExpected) {
+    const nextState = advanceAfter("episode", fresh.state);
+    updateProject(project.id, { state: nextState });
+    send({ type: "state", state: nextState });
+  } else if (fresh) {
+    send({ type: "state", state: fresh.state, written: after.length, total: totalExpected });
+  }
+}
+
+function resolveReviewTargets(args: Record<string, unknown>, episodeIdxs: number[]): number[] {
+  if (episodeIdxs.length === 0) return [];
+  const mode = (args.mode as string | undefined) ?? "single";
+  if (mode === "all") return [...episodeIdxs];
+  if (mode === "range") {
+    const from = Number(args.from) || episodeIdxs[0];
+    const to = Number(args.to) || from;
+    return episodeIdxs.filter((i) => i >= from && i <= to);
+  }
+  const idx = Number(args.index);
+  if (!Number.isFinite(idx) || idx < 1) throw new Error("review 参数缺少 index");
+  if (!episodeIdxs.includes(idx)) throw new Error(`第 ${idx} 集尚未写成`);
+  return [idx];
+}
+
+async function runReview(ctx: RunCtx) {
+  const { cfg, project, args, send, signal } = ctx;
+  const outline = getLatestArtifact(project.id, "outline");
+  if (!outline) throw new Error("缺少分集目录");
+  const episodeIdxs = getEpisodeIndices(project.id);
+  const targets = resolveReviewTargets(args, episodeIdxs);
+  if (targets.length === 0) {
+    send({ type: "progress", stage: "noop", message: "没有可复盘的集数" });
+    return;
+  }
+
+  const refs = loadRefsForCommand("review");
+
+  for (const epIdx of targets) {
+    if (signal.aborted) throw new Error("已取消");
+    const ep = getLatestArtifact(project.id, `episode-${epIdx}`);
+    if (!ep) {
+      send({ type: "progress", stage: "skip", message: `第 ${epIdx} 集未写，跳过` });
+      continue;
+    }
+    const epOutline = extractEpisodeOutline(outline.content, epIdx);
+
+    let attempt = 0;
+    let retryHint: string | undefined;
+    let review: ReturnType<typeof extractReviewJson> | null = null;
+    let rawContent = "";
+
+    while (attempt < 2) {
+      attempt += 1;
+      send({
+        type: "progress",
+        stage: "calling-llm",
+        message: `正在复盘第 ${epIdx} 集${attempt > 1 ? "（重试）" : ""}…`,
+        episode: epIdx,
+        attempt,
+      });
+      const messages = buildReviewMessages(
+        project.state,
+        {
+          episodeIndex: epIdx,
+          episodeOutline: epOutline,
+          episodeScreenplay: ep.content,
+        },
+        refs,
+        retryHint
+      );
+      rawContent = await streamAndCollect(
+        cfg,
+        messages,
+        { temperature: 0.3, maxTokens: 1800, signal },
+        send
+      );
+      review = extractReviewJson(rawContent);
+      if (review.ok) break;
+      retryHint = review.error;
+      send({
+        type: "progress",
+        stage: "retry",
+        message: `第 ${epIdx} 集 JSON 校验失败：${review.error}`,
+        episode: epIdx,
+      });
+    }
+
+    if (!review || !review.ok) {
+      const msg = review ? review.error : "review 失败";
+      send({ type: "progress", stage: "fail", message: `第 ${epIdx} 集复盘失败：${msg}`, episode: epIdx });
+      continue;
+    }
+
+    const data = review.data;
+    const avg =
+      (data.scores.pace +
+        data.scores.satisfy +
+        data.scores.dialogue +
+        data.scores.format +
+        data.scores.coherence) /
+      5;
+    const artifact = saveArtifact({
+      projectId: project.id,
+      name: `review-${epIdx}`,
+      content: JSON.stringify(data, null, 2),
+      meta: {
+        episodeIndex: epIdx,
+        avg: Math.round(avg * 10) / 10,
+        scores: data.scores,
+        danger: data.issues.filter((i) => i.level === "danger").length,
+        warn: data.issues.filter((i) => i.level === "warn").length,
+        info: data.issues.filter((i) => i.level === "info").length,
+      },
+    });
+    send({
+      type: "artifact",
+      name: `review-${epIdx}`,
+      version: artifact.version,
+      length: artifact.content.length,
+      episode: epIdx,
+      avg: Math.round(avg * 10) / 10,
+      issues: data.issues.length,
+    });
+  }
+
+  const totalExpected = project.state.totalEpisodes || 0;
+  const reviewed = getReviewIndices(project.id);
+  const fresh = getProject(project.id);
+  if (fresh && totalExpected && reviewed.length >= totalExpected) {
+    const nextState = advanceAfter("review", fresh.state);
+    updateProject(project.id, { state: nextState });
+    send({ type: "state", state: nextState });
+  } else if (fresh) {
+    send({ type: "state", state: fresh.state, reviewed: reviewed.length, total: totalExpected });
+  }
 }

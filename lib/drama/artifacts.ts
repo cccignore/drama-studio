@@ -58,6 +58,47 @@ export function listArtifacts(projectId: string): Artifact[] {
   return rows.map(rowToArtifact);
 }
 
+export function listArtifactsByPrefix(projectId: string, prefix: string): Artifact[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT a.* FROM artifacts a
+       JOIN (SELECT name, MAX(version) AS v FROM artifacts WHERE project_id = ? AND name LIKE ? GROUP BY name) m
+       ON m.name = a.name AND m.v = a.version
+       WHERE a.project_id = ?
+       ORDER BY a.name ASC`
+    )
+    .all(projectId, `${prefix}%`, projectId) as ArtifactRow[];
+  return rows.map(rowToArtifact);
+}
+
+export function getEpisodeIndices(projectId: string): number[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT name FROM artifacts WHERE project_id = ? AND name LIKE 'episode-%'`
+    )
+    .all(projectId) as { name: string }[];
+  const idxs: number[] = [];
+  for (const r of rows) {
+    const m = r.name.match(/^episode-(\d+)$/);
+    if (m) idxs.push(parseInt(m[1], 10));
+  }
+  return idxs.sort((a, b) => a - b);
+}
+
+export function getReviewIndices(projectId: string): number[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT name FROM artifacts WHERE project_id = ? AND name LIKE 'review-%'`
+    )
+    .all(projectId) as { name: string }[];
+  const idxs: number[] = [];
+  for (const r of rows) {
+    const m = r.name.match(/^review-(\d+)$/);
+    if (m) idxs.push(parseInt(m[1], 10));
+  }
+  return idxs.sort((a, b) => a - b);
+}
+
 export function saveArtifact(input: {
   projectId: string;
   name: string;
