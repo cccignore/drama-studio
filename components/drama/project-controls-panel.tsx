@@ -65,6 +65,7 @@ export function ProjectControlsPanel({
                 presetForm={controls.presetForm}
                 setPresetForm={controls.setPresetForm}
                 onApply={controls.applyPreset}
+                resolvedBindings={controls.resolvedBindings}
               />
               <BindingPanel
                 configs={controls.configs}

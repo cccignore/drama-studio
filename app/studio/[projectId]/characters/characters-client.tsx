@@ -9,6 +9,7 @@ import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import { extractMermaid } from "@/lib/drama/parsers/extract-mermaid";
 import { MermaidGraph } from "@/components/drama/mermaid-graph";
 import { CharacterCardsMarkdown } from "@/components/drama/character-cards";
+import { ReviseDrawer } from "@/components/drama/revise/revise-drawer";
 
 export function CharactersStepClient({
   projectId,
@@ -63,14 +64,24 @@ export function CharactersStepClient({
             产出 4–6 张人物卡 + Mermaid 人物关系图（主角 / 中反派 / 大反派 / 配角）。
           </p>
         </div>
-        {canAdvance && !running && (
-          <Link href={`/studio/${projectId}/outline`}>
-            <Button variant="secondary">
-              进入下一步 · 分集
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          {savedContent && (
+            <ReviseDrawer
+              projectId={projectId}
+              artifactName="characters"
+              disabled={running}
+              onUpdated={refreshArtifact}
+            />
+          )}
+          {canAdvance && !running && (
+            <Link href={`/studio/${projectId}/outline`}>
+              <Button variant="secondary">
+                进入下一步 · 分集
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          )}
+        </div>
       </header>
 
       <section className="panel flex items-center justify-between gap-2 p-4">

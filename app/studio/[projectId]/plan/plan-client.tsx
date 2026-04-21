@@ -9,6 +9,7 @@ import { PaceWaveform } from "@/components/drama/pace-waveform";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import { extractPlanCurve, type PlanCurvePoint } from "@/lib/drama/parsers/extract-plan-curve";
+import { ReviseDrawer } from "@/components/drama/revise/revise-drawer";
 
 export function PlanStepClient({
   projectId,
@@ -72,14 +73,24 @@ export function PlanStepClient({
             基于立项卡，AI 规划四段节奏、爽点地图与 5–7 个付费卡点（共 {totalEpisodes} 集）。
           </p>
         </div>
-        {canAdvance && !running && (
-          <Link href={`/studio/${projectId}/characters`}>
-            <Button variant="secondary">
-              进入下一步 · 角色
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          {savedContent && (
+            <ReviseDrawer
+              projectId={projectId}
+              artifactName="plan"
+              disabled={running}
+              onUpdated={refreshArtifact}
+            />
+          )}
+          {canAdvance && !running && (
+            <Link href={`/studio/${projectId}/characters`}>
+              <Button variant="secondary">
+                进入下一步 · 角色
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          )}
+        </div>
       </header>
 
       <section className="panel">

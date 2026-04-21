@@ -30,10 +30,11 @@
 
 ### 加分能力（已实现）
 
-- **`/overseas` 出海模式**：一键切英文剧本 + Hollywood 标准格式
+- **`/overseas` 出海模式**：中文场记 + 英文对白的双语剧本格式
 - **`/compliance` 合规检查**：基于已写剧本生成红线 / 风险 / 通过三色面板
-- **MoE 多模型路由**：按命令绑定不同模型（例如 `plan` 用更贵的推理模型，`episode` 用便宜的长文本模型），内置三种预设（均衡 / 质量 / 经济）
+- **MoE 多模型路由**：支持 `slot:primary/secondary/tertiary/overseas` 全局角色槽，内置质量优先 MoE（GPT-5.4 / DeepSeek / Grok）
 - **Multi-agent 协同**：Planner → Critic → Writer 三角色协同，可按命令启用（`plan` / `episode`）
+- **Step 级编辑**：每个关键产物支持 AI 对话式局部改写、手动 Markdown 编辑、版本历史与回滚
 - **References 按需加载**：第 1-3 集自动加上 `opening-rules`，出海流程走英文 references
 - **Docker / Compose 一键部署**：standalone build + outputFileTracingIncludes 把 references 打进镜像
 
@@ -65,6 +66,8 @@ cp .env.example .env                   # 把 APP_SECRET 换成 openssl rand -hex
 npm run init-db                        # 初始化 SQLite + 默认模型
 npm run dev                            # http://localhost:3000
 ```
+
+想一键用上 GPT-5.4 / DeepSeek / Grok？在 `.env` 里填 `YUNWU_API_KEY`，然后 `npm run init-db` 会自动预置三条模型。
 
 第一次打开 → `/settings/models` 配一个模型（OpenAI 兼容 + DeepSeek 最省事）→ `/studio` 新建项目 → 点 **「一键填入 5 集试玩案例」** → 跑完 `start → plan → characters → outline → episode 1 → review → export`。
 
@@ -138,6 +141,8 @@ docker compose logs -f drama-studio
 | `DRAMA_DATA_DIR` | | SQLite 与产物目录，默认 `./.data`，Docker 下为 `/app/.data` |
 | `LOG_LEVEL` | | 日志级别，默认 `info` |
 | `DEFAULT_LLM_*` | | 可选，部署时自动预置一条默认 LLM 配置；留空则到 UI 手动添加 |
+| `YUNWU_API_KEY` | | 可选，填了会自动预置云雾 GPT-5.4 / DeepSeek-V3.2 / Grok-4.2 |
+| `YUNWU_BASE_URL` | | 云雾 OpenAI 兼容 Base URL，默认 `https://api.yunwu.ai/v1` |
 
 ---
 
@@ -151,8 +156,10 @@ app/
   settings/models/                    模型配置管理
   api/projects/[id]/run               SSE 流式命令分发
   api/projects/[id]/events            事件回放（重进页面复原进度）
-  api/projects/[id]/artifacts|export  产物 / 导出
+  api/projects/[id]/artifacts|export  产物 / 导出 / 历史 / 回滚
+  api/projects/[id]/revise            产物 AI 对话式改写
   api/projects/[id]/llm-bindings      每命令模型绑定
+  api/llm-role-bindings               MoE 角色槽位绑定
   api/llm-configs                     模型配置 CRUD
 components/
   drama/                              关系图 / 目录 / 剧本 / 复盘 / 导出 / 新手引导
@@ -184,7 +191,7 @@ Dockerfile, docker-compose.yml        容器化部署
 | `outline` | 付费卡点 · 节奏曲线 · 钩子设计 |
 | `episode` | 第 1-3 集：开篇规则；之后：节奏曲线 · 爽点矩阵 · 钩子设计 |
 | `review` | 节奏曲线 · 钩子设计 · 爽点矩阵 |
-| `overseas` | Hollywood 标准 · 文化本地化 · 海外节奏 |
+| `overseas` | 双语剧本规范 · 文化本地化 · 海外节奏 |
 | `compliance` | 红线清单 · 风险库 · 合规指南 |
 
 核心实现：[`lib/drama/references.ts`](./lib/drama/references.ts) · [`lib/drama/prompts/`](./lib/drama/prompts/) · [`app/api/projects/[id]/run/route.ts`](./app/api/projects/[id]/run/route.ts)

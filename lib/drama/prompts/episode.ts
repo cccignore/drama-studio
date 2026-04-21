@@ -25,25 +25,26 @@ export function buildEpisodeMessages(
 
   const outputRequirements = isOverseas
     ? [
-        "【输出要求】Write the full episode screenplay in English. Keep the structural markers exactly as specified so the system can parse/export it.",
+        "【输出要求】写完整单集剧本，采用「中文场记 + 英文对白」双语格式。保持结构标记，便于系统解析/导出。",
         "",
-        `# Episode ${ctx.episodeIndex} · Punchy Episode Title`,
+        `# 第 ${ctx.episodeIndex} 集 · Punchy Episode Title（中文释义）`,
         "",
-        "## Scene 1 · Scene name (Location / Time)",
+        "## 场 1 · Café at 5th Avenue（纽约咖啡馆 / 日）",
         "",
-        "△ Action line. Start with a verb. Keep it visual and shootable.",
+        "△ （特写）林夏（Lin Xia）推门而入，风衣被风吹得贴在身上。",
         "",
-        '**CHARACTER NAME** (emotion/action): "Short, sharp line."',
+        '**林夏 / Lin Xia**（惊讶）: "Chen? What are you doing here?"',
+        '**陈辰 / Chen Morrison**（冷静）: "I have been waiting for you. For three years."',
         "",
-        "△ Continue the conflict escalation...",
+        "△ 继续用中文写动作与镜头提示，推动冲突升级。",
         "",
-        "♪ Music cue: ... (max 2 times in the whole episode)",
+        "♪ 低沉钢琴声压住两人的呼吸。",
         "",
-        "## Scene 2 · ...",
+        "## 场 2 · ……",
         "",
-        "… (3-5 scenes total, headings must use `## Scene N · ...`)",
+        "…（本集共 3-5 场戏，场次用 `## 场 N · ...`）",
         "",
-        "【END OF EPISODE】",
+        "【本集完】",
       ]
     : [
         "【输出要求】严格按如下剧本格式，不要用 Markdown 标题之外的任何代码块；不要写解释、不要写「以下是第N集」开头。",
@@ -69,7 +70,7 @@ export function buildEpisodeMessages(
 
   const user = [
     isOverseas
-      ? `【任务】写第 ${ctx.episodeIndex} 集完整剧本（2-3 minute episode, about 850-1300 English words, Hollywood-friendly pacing).`
+      ? `【任务】写第 ${ctx.episodeIndex} 集完整剧本（2-3 分钟，中文场记 + 英文对白，海外平台友好节奏）。`
       : `【任务】写第 ${ctx.episodeIndex} 集完整剧本（单集时长 2-3 分钟，约 900-1400 字）。`,
     "",
     "【项目信息】",
@@ -101,25 +102,36 @@ export function buildEpisodeMessages(
     "",
     refsBlock(refs),
     "",
+    isOverseas
+      ? [
+          "【双语格式硬约束】",
+          "- 场景标题、△ 镜头提示、♪ 音乐提示、（情绪）括号 → 一律中文。",
+          "- 每句对白 → English only，不允许中英混杂。",
+          "- 角色名：首次出场 `林夏 / Lin Xia`，之后统一用英文主名，避免台词前姓名过长。",
+          "- 禁止用 `she said` / `he replied` 这类叙事描述，台词必须是纯对白。",
+          "- 不允许出现 `I am very 生气`、`Don't 骗我` 这类混杂对白。",
+        ].join("\n")
+      : "",
+    "",
     ...outputRequirements,
     "",
     "写作铁律：",
     `1) 前 30 秒必须抓人：${isFirst ? "直接按开篇黄金法则起手（钩子 / 身份反差 / 极端困境三选一）" : "承接上一集的悬念（用 1 个动作/台词 5 秒内回应）然后立刻抛新钩"}。`,
     isOverseas
-      ? "2) Mid-episode conflict must escalate scene by scene. No idle chatter, no recap padding."
+      ? "2) 中段冲突必须逐场升级。中文动作短、可拍；英文对白短、狠、口语化。"
       : "2) 中段冲突必须升级；每个场次必须推进剧情，不得「闲聊 / 回忆 / 铺垫」而无进展。",
     isOverseas
-      ? "3) The last 30 seconds must either deliver a payoff and a new hook, or hard-cut on the paywall cliffhanger."
+      ? "3) 结尾 30 秒必须释放小爽点并抛新悬念，或在付费卡点情绪最高处硬切。"
       : "3) 结尾 30 秒：" + (isPaywallEp(ctx.episodeOutline) ? "**必须**在情绪最高点硬切（付费卡点），结尾一行用 `【本集完】`。" : "释放一次小爽点 + 抛新悬念。"),
     isOverseas
-      ? "4) Dialogue must be tight and platform-friendly. Avoid long monologues and culture-specific jargon that global viewers cannot decode."
+      ? "4) 英文对白必须 tight and platform-friendly；禁止长独白；避免海外观众无法理解的本土梗。"
       : "4) 台词短平快，禁止长独白。每句台词不超过 25 字。",
     "5) 禁止使用开发者注释 / 代码块 / 任何 JSON。",
     isOverseas
-      ? "6) Keep character names, references and emotional beats globally legible. Reuse the overseas adaptation brief when choosing names, setting details and tone."
+      ? "6) 人名、关系与情绪动机必须对全球观众清晰。严格吸收出海适配 brief 的命名、场景和对白风格要求。"
       : "6) 全集不得出现除 `△` `♪` 以外的特殊前缀；情绪用圆括号 `（…）` 包在角色名后。",
     isOverseas
-      ? "7) Use `【END OF EPISODE】` as the final line."
+      ? "7) 最后一行使用 `【本集完】`。"
       : "",
   ]
     .filter((l) => l !== "")

@@ -1,13 +1,29 @@
-import type { ProjectLLMCommand } from "./types";
+import type { LLMRoleSlot, ProjectLLMCommand } from "./types";
 
 export interface RoutingPreset {
   id: string;
   name: string;
   description: string;
-  commands: Partial<Record<ProjectLLMCommand, "default" | "primary" | "secondary" | "tertiary">>;
+  commands: Partial<Record<ProjectLLMCommand, "default" | LLMRoleSlot>>;
 }
 
 export const ROUTING_PRESETS: RoutingPreset[] = [
+  {
+    id: "quality-moe",
+    name: "质量优先 MoE（推荐）",
+    description: "GPT-5.4 负责结构化，DeepSeek-V3.2 写长剧本，Grok-4.2 审校。",
+    commands: {
+      start: "primary",
+      plan: "primary",
+      characters: "primary",
+      outline: "primary",
+      episode: "secondary",
+      review: "tertiary",
+      compliance: "tertiary",
+      overseas: "overseas",
+      export: "default",
+    },
+  },
   {
     id: "single-default",
     name: "单模型默认",

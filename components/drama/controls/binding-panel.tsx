@@ -38,6 +38,13 @@ export function BindingPanel({
   savingCommand: string | null;
   onSave: (command: ProjectLLMCommand, configId: string) => void;
 }) {
+  const options = [
+    { id: "slot:primary", name: "Slot · Primary", protocol: "openai" as const, model: "结构主模型" },
+    { id: "slot:secondary", name: "Slot · Secondary", protocol: "openai" as const, model: "长文本模型" },
+    { id: "slot:tertiary", name: "Slot · Tertiary", protocol: "openai" as const, model: "审校模型" },
+    { id: "slot:overseas", name: "Slot · Overseas", protocol: "openai" as const, model: "出海模型" },
+    ...configs,
+  ];
   return (
     <div className="panel-2 p-4">
       <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
@@ -58,7 +65,7 @@ export function BindingPanel({
               label=""
               value={bindings[item.id] ?? ""}
               onChange={(value) => setBindings((prev) => ({ ...prev, [item.id]: value }))}
-              options={configs}
+              options={options}
             />
             <Button
               size="sm"

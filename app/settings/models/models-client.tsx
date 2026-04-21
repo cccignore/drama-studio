@@ -28,7 +28,31 @@ interface LLMConfig {
   extraHeaders?: Record<string, string>;
 }
 
+interface RoleBinding {
+  slot: "primary" | "secondary" | "tertiary" | "overseas";
+  configId: string;
+  config: LLMConfig | null;
+}
+
 const PRESETS = [
+  {
+    label: "GPT-5.4 (云雾)",
+    protocol: "openai",
+    baseUrl: "https://api.yunwu.ai/v1",
+    model: "gpt-5.4",
+  },
+  {
+    label: "DeepSeek-V3.2 (云雾)",
+    protocol: "openai",
+    baseUrl: "https://api.yunwu.ai/v1",
+    model: "deepseek-v3.2",
+  },
+  {
+    label: "Grok-4.2 (云雾)",
+    protocol: "openai",
+    baseUrl: "https://api.yunwu.ai/v1",
+    model: "grok-4.2",
+  },
   {
     label: "DeepSeek (OpenAI 兼容)",
     protocol: "openai",
@@ -69,6 +93,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function ModelsClient() {
   const [items, setItems] = React.useState<LLMConfig[]>([]);
+  const [roleBindings, setRoleBindings] = React.useState<RoleBinding[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [editing, setEditing] = React.useState<LLMConfig | null>(null);
   const [formOpen, setFormOpen] = React.useState(false);
@@ -77,8 +102,12 @@ export function ModelsClient() {
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api<{ items: LLMConfig[] }>("/api/llm-configs");
+      const [data, roles] = await Promise.all([
+        api<{ items: LLMConfig[] }>("/api/llm-configs"),
+        api<{ items: RoleBinding[] }>("/api/llm-role-bindings"),
+      ]);
       setItems(data.items);
+      setRoleBindings(roles.items);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -130,8 +159,27 @@ export function ModelsClient() {
     }
   };
 
+  const onSetRole = async (slot: RoleBinding["slot"], configId: string) => {
+    try {
+      await api(`/api/llm-role-bindings/${slot}`, {
+        method: "PUT",
+        body: JSON.stringify({ configId }),
+      });
+      toast.success("模型角色已更新");
+      await refresh();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-4xl">
+      <RoleBindingsPanel
+        configs={items}
+        items={roleBindings}
+        onSetRole={onSetRole}
+      />
+
       <div className="panel-2 mb-4 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <BrainCircuit className="h-4 w-4 text-[color:var(--color-primary)]" />
@@ -269,6 +317,65 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         <Plus className="h-4 w-4" />
         添加第一个配置
       </Button>
+    </div>
+  );
+}
+
+const ROLE_LABELS: Record<RoleBinding["slot"], { label: string; desc: string }> = {
+  primary: { label: "Primary · 结构主模型", desc: "立项、节奏、角色、分集等高阶结构" },
+  secondary: { label: "Secondary · 长文本模型", desc: "分集剧本等长文本生成" },
+  tertiary: { label: "Tertiary · 审校模型", desc: "复盘、合规、挑错与风险判断" },
+  overseas: { label: "Overseas · 出海模型", desc: "出海适配 brief 与双语剧本约束" },
+};
+
+function RoleBindingsPanel({
+  configs,
+  items,
+  onSetRole,
+}: {
+  configs: LLMConfig[];
+  items: RoleBinding[];
+  onSetRole: (slot: RoleBinding["slot"], configId: string) => void;
+}) {
+  const values = Object.fromEntries(items.map((item) => [item.slot, item.configId]));
+  return (
+    <div className="panel-2 mb-4 p-4">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <BrainCircuit className="h-4 w-4 text-[color:var(--color-accent)]" />
+        模型角色
+      </div>
+      <p className="mt-2 text-sm text-[color:var(--color-muted)]">
+        质量优先 MoE 使用这些全局槽位。项目绑定写入的是 <code>slot:primary</code> 这类引用，换槽位模型后，所有项目会即时跟随。
+      </p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {(Object.keys(ROLE_LABELS) as RoleBinding["slot"][]).map((slot) => {
+          const meta = ROLE_LABELS[slot];
+          return (
+            <label
+              key={slot}
+              className="rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3"
+            >
+              <div className="text-sm font-medium">{meta.label}</div>
+              <div className="mt-1 text-xs text-[color:var(--color-muted)]">{meta.desc}</div>
+              <select
+                value={values[slot] ?? ""}
+                onChange={(e) => {
+                  if (e.target.value) onSetRole(slot, e.target.value);
+                }}
+                disabled={configs.length === 0}
+                className="mt-2 h-9 w-full rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2 text-xs"
+              >
+                <option value="">未绑定</option>
+                {configs.map((cfg) => (
+                  <option key={cfg.id} value={cfg.id}>
+                    {cfg.name} · {cfg.model}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }

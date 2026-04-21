@@ -13,6 +13,15 @@ export interface LLMConfig {
 export interface BindingItem {
   command: ProjectLLMCommand;
   configId: string;
+  config?: LLMConfig | null;
+  slot?: string | null;
+  resolvedConfig?: LLMConfig | null;
+}
+
+export interface RoleBindingItem {
+  slot: "primary" | "secondary" | "tertiary" | "overseas";
+  configId: string;
+  config: LLMConfig | null;
 }
 
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -32,11 +41,14 @@ export interface PresetForm {
   primaryConfigId: string;
   secondaryConfigId: string;
   tertiaryConfigId: string;
+  overseasConfigId: string;
 }
 
 export function useProjectControls(projectId: string) {
   const [configs, setConfigs] = React.useState<LLMConfig[]>([]);
   const [bindings, setBindings] = React.useState<Record<string, string>>({});
+  const [resolvedBindings, setResolvedBindings] = React.useState<Record<string, LLMConfig | null>>({});
+  const [roleBindings, setRoleBindings] = React.useState<Record<string, string>>({});
   const [loading, setLoading] = React.useState(false);
   const [savingCommand, setSavingCommand] = React.useState<string | null>(null);
   const [presetForm, setPresetForm] = React.useState<PresetForm>({
@@ -44,26 +56,34 @@ export function useProjectControls(projectId: string) {
     primaryConfigId: "",
     secondaryConfigId: "",
     tertiaryConfigId: "",
+    overseasConfigId: "",
   });
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [cfgData, bindingData] = await Promise.all([
+      const [cfgData, bindingData, roleData] = await Promise.all([
         api<{ items: LLMConfig[] }>("/api/llm-configs"),
         api<{ items: BindingItem[] }>(`/api/projects/${projectId}/llm-bindings`),
+        api<{ items: RoleBindingItem[] }>("/api/llm-role-bindings"),
       ]);
       setConfigs(cfgData.items);
       const nextBindings = Object.fromEntries(
         bindingData.items.map((item) => [item.command, item.configId])
       );
       setBindings(nextBindings);
+      setResolvedBindings(
+        Object.fromEntries(bindingData.items.map((item) => [item.command, item.resolvedConfig ?? item.config ?? null]))
+      );
+      const nextRoles = Object.fromEntries(roleData.items.map((item) => [item.slot, item.configId]));
+      setRoleBindings(nextRoles);
       const defaultId = nextBindings.default ?? cfgData.items[0]?.id ?? "";
       setPresetForm((prev) => ({
         defaultConfigId: prev.defaultConfigId || defaultId,
-        primaryConfigId: prev.primaryConfigId || defaultId,
-        secondaryConfigId: prev.secondaryConfigId || defaultId,
-        tertiaryConfigId: prev.tertiaryConfigId || defaultId,
+        primaryConfigId: prev.primaryConfigId || nextRoles.primary || defaultId,
+        secondaryConfigId: prev.secondaryConfigId || nextRoles.secondary || defaultId,
+        tertiaryConfigId: prev.tertiaryConfigId || nextRoles.tertiary || defaultId,
+        overseasConfigId: prev.overseasConfigId || nextRoles.overseas || nextRoles.primary || defaultId,
       }));
     } catch (err) {
       toast.error((err as Error).message);
@@ -118,6 +138,8 @@ export function useProjectControls(projectId: string) {
     configs,
     bindings,
     setBindings,
+    resolvedBindings,
+    roleBindings,
     loading,
     savingCommand,
     presetForm,

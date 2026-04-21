@@ -10,6 +10,8 @@ import {
   upsertProjectLLMBinding,
   type ProjectLLMBinding,
 } from "@/lib/llm/store";
+import { upsertLLMRoleBinding } from "@/lib/llm/role-store";
+import type { LLMRoleSlot, ProjectLLMCommand } from "@/lib/llm/types";
 
 export const runtime = "nodejs";
 
@@ -18,6 +20,7 @@ const BodySchema = z.object({
   primaryConfigId: z.string().optional(),
   secondaryConfigId: z.string().optional(),
   tertiaryConfigId: z.string().optional(),
+  overseasConfigId: z.string().optional(),
   defaultConfigId: z.string().optional(),
 });
 
@@ -42,20 +45,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         parsed.data.secondaryConfigId ??
         parsed.data.primaryConfigId ??
         parsed.data.defaultConfigId,
+      overseas: parsed.data.overseasConfigId ?? parsed.data.primaryConfigId ?? parsed.data.defaultConfigId,
     };
+
+    const slotInputs: Partial<Record<LLMRoleSlot, string | undefined>> = {
+      primary: buckets.primary,
+      secondary: buckets.secondary,
+      tertiary: buckets.tertiary,
+      overseas: buckets.overseas,
+    };
+    for (const [slot, configId] of Object.entries(slotInputs) as Array<[LLMRoleSlot, string | undefined]>) {
+      if (configId) upsertLLMRoleBinding(slot, configId);
+    }
 
     const items: ProjectLLMBinding[] = [];
     for (const [command, bucket] of Object.entries(preset.commands)) {
       if (!bucket) continue;
-      const configId = buckets[bucket];
+      const configId = bucket === "default" ? buckets.default : `slot:${bucket}`;
       if (!configId) {
-        deleteProjectLLMBinding(id, command as keyof typeof preset.commands);
+        deleteProjectLLMBinding(id, command as ProjectLLMCommand);
         continue;
       }
-      if (!getLLMConfig(configId)) {
+      if (!configId.startsWith("slot:") && !getLLMConfig(configId)) {
         throw new AppError("not_found", `模型配置 ${configId} 不存在`, 404);
       }
-      items.push(upsertProjectLLMBinding(id, command as keyof typeof preset.commands, configId));
+      items.push(upsertProjectLLMBinding(id, command as ProjectLLMCommand, configId));
     }
 
     return ok({ items, preset });

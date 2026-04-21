@@ -47,6 +47,7 @@ export function getDefaultLLMConfig(includePlainKey = false): LLMConfig | null {
 }
 
 export interface CreateLLMConfigInput {
+  id?: string;
   name: string;
   protocol: LLMProtocol;
   baseUrl: string;
@@ -57,8 +58,12 @@ export interface CreateLLMConfigInput {
 }
 
 export function createLLMConfig(input: CreateLLMConfigInput): LLMConfig {
+  return insertLLMConfig(input);
+}
+
+export function insertLLMConfig(input: CreateLLMConfigInput): LLMConfig {
   const db = getDb();
-  const id = `cfg_${nanoid(10)}`;
+  const id = input.id ?? `cfg_${nanoid(10)}`;
   const now = Date.now();
   const tx = db.transaction(() => {
     if (input.isDefault) {
@@ -66,7 +71,15 @@ export function createLLMConfig(input: CreateLLMConfigInput): LLMConfig {
     }
     db.prepare(
       `INSERT INTO llm_configs (id, name, protocol, base_url, api_key, model, extra_headers, is_default, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         protocol = excluded.protocol,
+         base_url = excluded.base_url,
+         api_key = excluded.api_key,
+         model = excluded.model,
+         extra_headers = excluded.extra_headers,
+         is_default = excluded.is_default`
     ).run(
       id,
       input.name,

@@ -612,7 +612,7 @@ async function runEpisode(ctx: RunCtx) {
       stage: "calling-llm",
       message:
         project.state.mode === "overseas"
-          ? `正在写第 ${epIdx} 集英文版（${cfg.name}）…`
+          ? `正在写第 ${epIdx} 集出海双语版（${cfg.name}）…`
           : `正在写第 ${epIdx} 集（${cfg.name}）…`,
       episode: epIdx,
     });
@@ -622,7 +622,7 @@ async function runEpisode(ctx: RunCtx) {
       role: "writer",
       title:
         project.state.mode === "overseas"
-          ? "Writer 英文终稿"
+          ? "Writer 双语终稿"
           : "Writer 剧本终稿",
       model: cfg.name,
       episode: epIdx,
@@ -655,7 +655,7 @@ async function runEpisode(ctx: RunCtx) {
       role: "writer",
       title:
         project.state.mode === "overseas"
-          ? "Writer 英文终稿"
+          ? "Writer 双语终稿"
           : "Writer 剧本终稿",
       model: cfg.name,
       episode: epIdx,
@@ -845,7 +845,7 @@ async function runOverseas({ cfg, project, send, signal }: RunCtx) {
 
   const refs = loadRefsForCommand("overseas");
   const messages = buildOverseasMessages(
-    { ...project.state, mode: "overseas", language: "en-US" },
+    { ...project.state, mode: "overseas", language: "zh-CN" },
     {
       startCard: startCard.content,
       plan: plan?.content,
@@ -869,10 +869,10 @@ async function runOverseas({ cfg, project, send, signal }: RunCtx) {
     projectId: project.id,
     name: "overseas-brief",
     content,
-    meta: { language: "en-US", mode: "overseas" },
+    meta: { language: "bilingual", mode: "overseas" },
   });
   const updated = updateProject(project.id, {
-    state: { mode: "overseas", language: "en-US" },
+    state: { mode: "overseas", language: "zh-CN" },
   });
   send({
     type: "artifact",

@@ -19,6 +19,7 @@ import { AgentWorkflowPanel } from "@/components/drama/agent-workflow-panel";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import { ScreenplayRenderer } from "@/components/drama/screenplay-renderer";
+import { ReviseDrawer } from "@/components/drama/revise/revise-drawer";
 
 export interface EpisodeBrief {
   index: number;
@@ -131,6 +132,14 @@ export function EpisodeStepClient({
           >
             返回分集目录
           </Link>
+          {content && (
+            <ReviseDrawer
+              projectId={projectId}
+              artifactName={`episode-${selected}`}
+              disabled={running}
+              onUpdated={refreshSelected}
+            />
+          )}
           <Button
             variant="secondary"
             disabled={!canProceed}

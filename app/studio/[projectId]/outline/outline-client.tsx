@@ -17,6 +17,7 @@ import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import { parseDirectory, type DirectoryExtract } from "@/lib/drama/parsers/extract-directory";
 import { EpisodeDirectory } from "@/components/drama/episode-directory";
+import { ReviseDrawer } from "@/components/drama/revise/revise-drawer";
 
 export function OutlineStepClient({
   projectId,
@@ -33,10 +34,25 @@ export function OutlineStepClient({
 
   const router = useRouter();
 
+  const refreshArtifact = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/artifacts/outline`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const item = json?.data?.item ?? json?.item;
+      if (typeof item?.content === "string") setSavedContent(item.content);
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
     command: "outline",
-    onDone: () => toast.success("分集目录已生成"),
+    onDone: async () => {
+      await refreshArtifact();
+      toast.success("分集目录已生成");
+    },
   });
 
   React.useEffect(() => {
@@ -78,6 +94,14 @@ export function OutlineStepClient({
           >
             返回角色
           </Link>
+          {savedContent && (
+            <ReviseDrawer
+              projectId={projectId}
+              artifactName="outline"
+              disabled={running}
+              onUpdated={refreshArtifact}
+            />
+          )}
           <Button
             variant="secondary"
             disabled={!savedContent || running}

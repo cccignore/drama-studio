@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "init-db": "tsx scripts/init-db.ts",
+    "migrate:m5": "tsx scripts/migrate-m5.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
   content_md TEXT NOT NULL,
   meta_json  TEXT,
   version    INTEGER NOT NULL DEFAULT 1,
+  source     TEXT NOT NULL DEFAULT 'generate',
+  parent_version INTEGER,
   created_at INTEGER NOT NULL,
   UNIQUE(project_id, name, version)
 );
@@ -46,3 +48,21 @@ CREATE TABLE IF NOT EXISTS project_llm_bindings (
   config_id  TEXT NOT NULL,
   PRIMARY KEY(project_id, command)
 );
+
+CREATE TABLE IF NOT EXISTS llm_role_bindings (
+  slot       TEXT PRIMARY KEY,
+  config_id  TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS step_conversations (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id      TEXT NOT NULL,
+  artifact_name   TEXT NOT NULL,
+  role            TEXT NOT NULL,
+  content         TEXT NOT NULL,
+  patch_json      TEXT,
+  applied_version INTEGER,
+  ts              INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stepconv_project ON step_conversations(project_id, artifact_name, ts);

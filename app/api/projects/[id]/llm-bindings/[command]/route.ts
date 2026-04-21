@@ -9,6 +9,7 @@ import {
   isProjectLLMCommand,
   upsertProjectLLMBinding,
 } from "@/lib/llm/store";
+import { parseSlotConfigId } from "@/lib/llm/role-store";
 
 export const runtime = "nodejs";
 
@@ -29,7 +30,7 @@ export async function PUT(
     if (!parsed.success) {
       throw new AppError("invalid_input", parsed.error.issues[0]?.message ?? "参数错误", 400);
     }
-    if (!getLLMConfig(parsed.data.configId)) {
+    if (!parseSlotConfigId(parsed.data.configId) && !getLLMConfig(parsed.data.configId)) {
       throw new AppError("not_found", "模型配置不存在", 404);
     }
     return ok({ item: upsertProjectLLMBinding(id, command, parsed.data.configId) });

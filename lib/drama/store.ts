@@ -1,6 +1,9 @@
 import { nanoid } from "nanoid";
 import { getDb } from "../db/sqlite";
 import { defaultDramaState, type DramaState, type Project, type ProjectRow } from "./types";
+import { ROUTING_PRESETS } from "../llm/presets";
+import { getDefaultLLMConfig, upsertProjectLLMBinding } from "../llm/store";
+import type { ProjectLLMCommand } from "../llm/types";
 
 function rowToProject(row: ProjectRow): Project {
   let state: DramaState;
@@ -33,7 +36,22 @@ export function createProject(input: { title?: string; state?: Partial<DramaStat
       `INSERT INTO projects (id, title, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
     )
     .run(id, input.title?.trim() || "未命名项目", JSON.stringify(state), now, now);
+  applyDefaultRoutingPreset(id);
   return getProject(id)!;
+}
+
+function applyDefaultRoutingPreset(projectId: string) {
+  const preset = ROUTING_PRESETS.find((item) => item.id === "quality-moe");
+  if (!preset) return;
+  const fallback = getDefaultLLMConfig();
+  for (const [command, bucket] of Object.entries(preset.commands)) {
+    if (!bucket) continue;
+    if (bucket === "default") {
+      if (fallback?.id) upsertProjectLLMBinding(projectId, command as ProjectLLMCommand, fallback.id);
+      continue;
+    }
+    upsertProjectLLMBinding(projectId, command as ProjectLLMCommand, `slot:${bucket}`);
+  }
 }
 
 export function updateProject(

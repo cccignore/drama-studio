@@ -59,6 +59,32 @@ describe("parseScreenplay", () => {
     const ast = parseScreenplay("# 第 2 集 · 暂未完结\n\n## 场 1 · 空镜 / 晨\n\n△ 空。\n");
     expect(ast.closed).toBe(false);
   });
+
+  it("parses bilingual overseas dialogue with English colon", () => {
+    const ast = parseScreenplay(`# 第 1 集 · The Return（归来）
+
+## 场 1 · Café at 5th Avenue（纽约咖啡馆 / 日）
+
+△ （特写）林夏（Lin Xia）推门而入。
+♪ 低沉钢琴声。
+**林夏 / Lin Xia**（惊讶）: "Chen? What are you doing here?"
+**Chen Morrison**（冷静）: "I have been waiting for you. For three years."
+
+【本集完】`);
+    expect(ast.scenes).toHaveLength(1);
+    const dialogues = ast.scenes[0].blocks.filter((b) => b.kind === "dialogue");
+    expect(dialogues[0]).toMatchObject({
+      kind: "dialogue",
+      role: "林夏 / Lin Xia",
+      emotion: "惊讶",
+      line: "Chen? What are you doing here?",
+    });
+    expect(dialogues[1]).toMatchObject({
+      kind: "dialogue",
+      role: "Chen Morrison",
+      line: "I have been waiting for you. For three years.",
+    });
+  });
 });
 
 describe("summarizeScreenplay", () => {

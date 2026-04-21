@@ -12,6 +12,8 @@ export type ProjectLLMCommand =
   | "overseas"
   | "compliance";
 
+export type LLMRoleSlot = "primary" | "secondary" | "tertiary" | "overseas";
+
 export interface LLMConfig {
   id: string;
   name: string;

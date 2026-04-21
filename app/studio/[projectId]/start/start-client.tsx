@@ -10,6 +10,7 @@ import { VoiceInput } from "@/components/wizard/voice-input";
 import { StreamingConsole } from "@/components/wizard/streaming-console";
 import { useStreamingCommand } from "@/hooks/use-streaming-command";
 import type { DramaState } from "@/lib/drama/types";
+import { ReviseDrawer } from "@/components/drama/revise/revise-drawer";
 
 const AUDIENCES = ["男频", "女频", "全年龄"] as const;
 const TONES = ["爽燃", "甜虐", "搞笑", "暗黑", "温情"] as const;
@@ -40,10 +41,23 @@ export function StartStepClient({
   const [canAdvance, setCanAdvance] = React.useState<boolean>(!!initialArtifact);
   const isMiniSeries = totalEpisodes <= 5;
 
+  const refreshArtifact = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/artifacts/start-card`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const item = json?.data?.item ?? json?.item;
+      if (typeof item?.content === "string") setSavedContent(item.content);
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
     command: "start",
-    onDone: () => {
+    onDone: async () => {
+      await refreshArtifact();
       toast.success("立项卡已生成");
       setCanAdvance(true);
     },
@@ -109,14 +123,24 @@ export function StartStepClient({
             决定题材、受众、基调、总集数与核心创意。AI 将产出一份完整的立项卡。
           </p>
         </div>
-        {canAdvance && !running && (
-          <Link href={`/studio/${projectId}/plan`}>
-            <Button variant="secondary">
-              进入下一步 · 节奏
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          {savedContent && (
+            <ReviseDrawer
+              projectId={projectId}
+              artifactName="start-card"
+              disabled={running}
+              onUpdated={refreshArtifact}
+            />
+          )}
+          {canAdvance && !running && (
+            <Link href={`/studio/${projectId}/plan`}>
+              <Button variant="secondary">
+                进入下一步 · 节奏
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          )}
+        </div>
       </header>
 
       <section className="panel space-y-5 p-5">
@@ -195,7 +219,7 @@ export function StartStepClient({
             <span>核心创意 / 用户想法（可选，支持语音）</span>
             <VoiceInput
               disabled={running}
-              lang={mode === "overseas" ? "en-US" : "zh-CN"}
+              lang="zh-CN"
               onTranscript={(t) => setFreeText((prev) => (prev ? prev + " " + t : t))}
             />
           </label>

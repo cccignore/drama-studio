@@ -7,6 +7,8 @@ export interface ArtifactRow {
   content_md: string;
   meta_json: string | null;
   version: number;
+  source?: string;
+  parent_version?: number | null;
   created_at: number;
 }
 
@@ -17,6 +19,8 @@ export interface Artifact {
   content: string;
   meta: Record<string, unknown> | null;
   version: number;
+  source: string;
+  parentVersion: number | null;
   createdAt: number;
 }
 
@@ -36,6 +40,8 @@ function rowToArtifact(row: ArtifactRow): Artifact {
     content: row.content_md,
     meta,
     version: row.version,
+    source: row.source ?? "generate",
+    parentVersion: row.parent_version ?? null,
     createdAt: row.created_at,
   };
 }
@@ -47,6 +53,24 @@ export function getLatestArtifact(projectId: string, name: string): Artifact | n
     )
     .get(projectId, name) as ArtifactRow | undefined;
   return row ? rowToArtifact(row) : null;
+}
+
+export function getArtifactVersion(projectId: string, name: string, version: number): Artifact | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM artifacts WHERE project_id = ? AND name = ? AND version = ? LIMIT 1`
+    )
+    .get(projectId, name, version) as ArtifactRow | undefined;
+  return row ? rowToArtifact(row) : null;
+}
+
+export function listArtifactHistory(projectId: string, name: string): Artifact[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM artifacts WHERE project_id = ? AND name = ? ORDER BY version DESC`
+    )
+    .all(projectId, name) as ArtifactRow[];
+  return rows.map(rowToArtifact);
 }
 
 export function listArtifacts(projectId: string): Artifact[] {
@@ -104,6 +128,8 @@ export function saveArtifact(input: {
   name: string;
   content: string;
   meta?: Record<string, unknown> | null;
+  source?: "generate" | "ai-edit" | "manual-edit" | "revert";
+  parentVersion?: number | null;
 }): Artifact {
   const db = getDb();
   const latest = getLatestArtifact(input.projectId, input.name);
@@ -111,7 +137,8 @@ export function saveArtifact(input: {
   const now = Date.now();
   const info = db
     .prepare(
-      `INSERT INTO artifacts (project_id, name, content_md, meta_json, version, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO artifacts (project_id, name, content_md, meta_json, version, source, parent_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.projectId,
@@ -119,6 +146,8 @@ export function saveArtifact(input: {
       input.content,
       input.meta ? JSON.stringify(input.meta) : null,
       nextVersion,
+      input.source ?? "generate",
+      input.parentVersion ?? null,
       now
     );
   return {
@@ -128,6 +157,8 @@ export function saveArtifact(input: {
     content: input.content,
     meta: input.meta ?? null,
     version: nextVersion,
+    source: input.source ?? "generate",
+    parentVersion: input.parentVersion ?? null,
     createdAt: now,
   };
 }

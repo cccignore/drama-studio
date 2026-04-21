@@ -28,7 +28,7 @@ export function MarketPanel({
         <div className="rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
           <div className="font-medium">当前市场模式：{mode === "overseas" ? "出海" : "国内"}</div>
           <div className="mt-1 text-xs text-[color:var(--color-muted)]">
-            出海模式会生成英文剧本，并切换到 Hollywood 标准格式。
+            出海模式会生成中文适配 brief，并把剧本切为「中文场记 + 英文对白」格式。
           </div>
           <div className="mt-3 flex items-center gap-2">
             <Link href={`/studio/${projectId}/overseas`}>

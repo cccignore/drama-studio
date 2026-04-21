@@ -3,17 +3,20 @@ import { Sparkles } from "lucide-react";
 import { ROUTING_PRESETS } from "@/lib/llm/presets";
 import { FieldSelect } from "./field-select";
 import type { LLMConfig, PresetForm } from "./use-project-controls";
+import { BINDING_COMMANDS } from "./binding-panel";
 
 export function MoEPresetPanel({
   configs,
   presetForm,
   setPresetForm,
   onApply,
+  resolvedBindings,
 }: {
   configs: LLMConfig[];
   presetForm: PresetForm;
   setPresetForm: React.Dispatch<React.SetStateAction<PresetForm>>;
   onApply: (presetId: string) => void;
+  resolvedBindings?: Record<string, LLMConfig | null>;
 }) {
   return (
     <div className="panel-2 p-4">
@@ -48,6 +51,12 @@ export function MoEPresetPanel({
           onChange={(value) => setPresetForm((prev) => ({ ...prev, tertiaryConfigId: value }))}
           options={configs}
         />
+        <FieldSelect
+          label="出海模型"
+          value={presetForm.overseasConfigId}
+          onChange={(value) => setPresetForm((prev) => ({ ...prev, overseasConfigId: value }))}
+          options={configs}
+        />
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-3">
         {ROUTING_PRESETS.map((preset) => (
@@ -64,6 +73,26 @@ export function MoEPresetPanel({
           </button>
         ))}
       </div>
+      {resolvedBindings && Object.keys(resolvedBindings).length > 0 && (
+        <div className="mt-4 rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
+          <div className="mb-2 text-xs font-medium text-[color:var(--color-muted)]">
+            当前项目实际路由
+          </div>
+          <div className="grid gap-1.5 text-xs md:grid-cols-2">
+            {BINDING_COMMANDS.filter((item) => item.id !== "default").map((item) => {
+              const cfg = resolvedBindings[item.id];
+              return (
+                <div key={item.id} className="flex items-center justify-between gap-2">
+                  <span className="text-[color:var(--color-muted)]">{item.label}</span>
+                  <span className="truncate text-[color:var(--color-foreground)]">
+                    {cfg ? `${cfg.name} · ${cfg.model}` : "使用默认模型"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

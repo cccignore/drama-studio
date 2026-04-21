@@ -96,13 +96,16 @@ export function parseScreenplay(markdown: string): ScreenplayAST {
 
     const dlgM = line.match(DIALOGUE_RE);
     if (dlgM) {
-      const rawLine = dlgM[3].replace(/^["""「]|["""」]$/g, "").trim();
+      const { line: dialogueLine, trailing } = splitDialogueLine(dlgM[3]);
       currentScene.blocks.push({
         kind: "dialogue",
         role: dlgM[1].trim(),
         emotion: dlgM[2]?.trim() || undefined,
-        line: rawLine,
+        line: dialogueLine,
       });
+      if (trailing) {
+        currentScene.blocks.push({ kind: "note", text: trailing });
+      }
       continue;
     }
 
@@ -146,6 +149,22 @@ export function summarizeScreenplay(ast: ScreenplayAST): ScreenplayStats {
       ? Math.round((ast.charCount / ast.scenes.length) * 10) / 10
       : 0,
   };
+}
+
+function splitDialogueLine(raw: string): { line: string; trailing?: string } {
+  const text = raw.trim();
+  const quoted = text.match(/^["""「]([\s\S]*?)["""」](.*)$/);
+  if (quoted) {
+    const trailing = quoted[2].replace(/^[\s,，。.；;—\-–]+/, "").trim();
+    return { line: quoted[1].trim(), trailing: trailing || undefined };
+  }
+  const dashIdx = text.search(/\s[—–]\s|\s--\s/);
+  if (dashIdx >= 0) {
+    const line = text.slice(0, dashIdx).replace(/^["""「]|["""」]$/g, "").trim();
+    const trailing = text.slice(dashIdx).replace(/^\s*[—–\-]+\s*/, "").trim();
+    return { line, trailing: trailing || undefined };
+  }
+  return { line: text.replace(/^["""「]|["""」]$/g, "").trim() };
 }
 
 export function extractEpisodeTail(screenplay: string, maxChars = 800): string {

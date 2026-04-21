@@ -10,7 +10,7 @@ export const REF_MAP: Record<string, string[]> = {
   outline: ["paywall-design", "rhythm-curve", "hook-design"],
   episode: ["rhythm-curve", "satisfaction-matrix", "hook-design"],
   review: ["rhythm-curve", "hook-design", "satisfaction-matrix"],
-  overseas: ["genre-guide", "hook-design"],
+  overseas: ["genre-guide", "hook-design", "hollywood-bilingual"],
   compliance: ["compliance-checklist"],
 };
 

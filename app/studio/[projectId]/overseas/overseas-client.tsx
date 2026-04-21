@@ -81,7 +81,7 @@ export function OverseasClient({
             出海模式
           </h1>
           <p className="mt-1 text-sm text-[color:var(--color-muted)]">
-            生成英文 adaptation brief，并把后续 `/episode` 写作切到英文、Hollywood-friendly 格式。
+            生成中文出海适配 brief，并把后续 `/episode` 写作切到「中文场记 + 英文对白」格式。
           </p>
         </div>
         <Link href={`/studio/${projectId}/episode`}>
@@ -98,9 +98,9 @@ export function OverseasClient({
             当前市场模式
           </div>
           <div className="rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] p-4 text-sm">
-            <div className="font-medium">{mode === "overseas" ? "Overseas / English" : "Domestic / 中文"}</div>
+            <div className="font-medium">{mode === "overseas" ? "Overseas / 双语剧本" : "Domestic / 中文"}</div>
             <div className="mt-2 text-[color:var(--color-muted)]">
-              出海模式会优先使用全球观众更容易理解的关系冲突、英文对白，以及更靠近 ReelShort / DramaBox 的开场钩子与 cliffhanger。
+              出海模式会优先使用全球观众更容易理解的关系冲突；场记、动作、镜头仍用中文，角色台词使用自然英文。
             </div>
           </div>
         </div>
@@ -113,7 +113,7 @@ export function OverseasClient({
           ) : (
             <Button onClick={() => run()} className="w-full">
               <Play className="h-4 w-4" />
-              {savedContent ? "重新生成适配 brief" : "生成 overseas brief"}
+              {savedContent ? "重新生成适配 brief" : "生成出海 brief"}
             </Button>
           )}
           {mode === "overseas" && (
@@ -129,7 +129,7 @@ export function OverseasClient({
 
       {displayContent && !running && (
         <section className="panel p-5">
-          <div className="mb-3 text-sm font-semibold">Overseas Adaptation Brief</div>
+          <div className="mb-3 text-sm font-semibold">出海适配 Brief</div>
           <pre className="whitespace-pre-wrap break-words rounded-md bg-[color:var(--color-surface-2)] p-4 text-[13px] leading-[1.75]">
             {displayContent}
           </pre>

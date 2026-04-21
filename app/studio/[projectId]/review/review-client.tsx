@@ -21,6 +21,7 @@ import {
   extractReviewJson,
   type ReviewResult,
 } from "@/lib/drama/parsers/extract-review-json";
+import { ReviseDrawer } from "@/components/drama/revise/revise-drawer";
 
 export interface ReviewEntry {
   index: number;
@@ -140,6 +141,14 @@ export function ReviewStepClient({
           >
             返回剧本
           </Link>
+          {entries.some((entry) => entry.index === selected && entry.review) && (
+            <ReviseDrawer
+              projectId={projectId}
+              artifactName={`review-${selected}`}
+              disabled={running}
+              onUpdated={() => refreshEntry(selected)}
+            />
+          )}
           <Button
             variant="secondary"
             disabled={!canProceed}
