@@ -45,6 +45,7 @@ export interface LLMMessage {
 
 export type LLMStreamEvent =
   | { type: "delta"; text: string }
+  | { type: "reasoning"; text: string }
   | { type: "done"; usage?: { input?: number; output?: number } }
   | { type: "error"; message: string };
 

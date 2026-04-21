@@ -220,10 +220,21 @@ async function collectLLM(
   send: SSESender
 ): Promise<string> {
   let acc = "";
+  let reasoningBuf = "";
+  let lastReasoningSend = 0;
   for await (const ev of streamLLM(cfg, messages, opts)) {
     if (ev.type === "delta") {
       acc += ev.text;
       send({ type: "delta", text: ev.text });
+    } else if (ev.type === "reasoning") {
+      reasoningBuf += ev.text;
+      const now = Date.now();
+      if (now - lastReasoningSend > 600) {
+        lastReasoningSend = now;
+        const compact = reasoningBuf.replace(/\s+/g, " ").trim();
+        const tail = compact.length > 60 ? `…${compact.slice(-60)}` : compact;
+        send({ type: "progress", stage: "thinking", message: `深度思考中 · ${tail}` });
+      }
     } else if (ev.type === "error") {
       throw new Error(ev.message);
     } else if (ev.type === "done") {

@@ -50,7 +50,10 @@ export async function* streamOpenAICompat(
       } catch {
         continue;
       }
-      const delta: string | undefined = json?.choices?.[0]?.delta?.content;
+      const choice = json?.choices?.[0];
+      const reasoning: string | undefined = choice?.delta?.reasoning_content;
+      if (reasoning) yield { type: "reasoning", text: reasoning };
+      const delta: string | undefined = choice?.delta?.content;
       if (delta) yield { type: "delta", text: delta };
       if (json?.usage) {
         usage = {

@@ -175,10 +175,19 @@ async function streamAndCollect(
 ): Promise<string> {
   const { streamPartial = true, emitUsage = true } = collectOpts;
   let acc = "";
+  let reasoningBuf = "";
+  let lastReasoningSend = 0;
   for await (const ev of streamLLM(cfg, messages, opts)) {
     if (ev.type === "delta") {
       acc += ev.text;
       if (streamPartial) send({ type: "partial", text: ev.text });
+    } else if (ev.type === "reasoning") {
+      reasoningBuf += ev.text;
+      const now = Date.now();
+      if (now - lastReasoningSend > 600) {
+        lastReasoningSend = now;
+        send({ type: "progress", stage: "thinking", message: `深度思考中 · ${reasoningPreview(reasoningBuf)}` });
+      }
     } else if (ev.type === "error") {
       throw new Error(ev.message);
     } else if (ev.type === "done") {
@@ -186,6 +195,12 @@ async function streamAndCollect(
     }
   }
   return acc;
+}
+
+function reasoningPreview(text: string, maxChars = 60): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxChars) return compact;
+  return `…${compact.slice(-maxChars)}`;
 }
 
 function summarizePreview(text: string, maxChars = 240): string {
