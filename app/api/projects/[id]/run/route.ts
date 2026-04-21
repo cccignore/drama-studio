@@ -23,6 +23,7 @@ import {
 import { buildStartMessages, type StartArgs } from "@/lib/drama/prompts/start";
 import { buildPlanMessages } from "@/lib/drama/prompts/plan";
 import { buildCharactersMessages } from "@/lib/drama/prompts/characters";
+import { buildCharactersRepairMessages } from "@/lib/drama/prompts/characters-repair";
 import { buildOutlineMessages } from "@/lib/drama/prompts/outline";
 import { buildEpisodeMessages } from "@/lib/drama/prompts/episode";
 import { buildReviewMessages } from "@/lib/drama/prompts/review";
@@ -206,6 +207,24 @@ function excerptForCompliance(content: string, maxChars = 2200): string {
   const head = trimmed.slice(0, Math.floor(maxChars * 0.6));
   const tail = trimmed.slice(-Math.floor(maxChars * 0.28));
   return `${head}\n\n[...中段已截断...]\n\n${tail}`;
+}
+
+function extractMermaidCode(text: string): string | null {
+  const block = extractMermaid(text);
+  if (block.code) return block.code;
+  const trimmed = text.trim();
+  if (/^(graph|flowchart)\s+[A-Z]{1,2}\b/i.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+function attachCharactersMermaid(content: string, code: string): string {
+  const cleaned = content
+    .trimEnd()
+    .replace(/\n*##\s*二、人物关系图[\s\S]*$/u, "")
+    .trimEnd();
+  return `${cleaned}\n\n## 二、人物关系图（Mermaid）\n\n\`\`\`mermaid\n${sanitizeMermaid(code).trim()}\n\`\`\`\n`;
 }
 
 async function runAgentTask({
@@ -403,16 +422,34 @@ async function runCharacters({ cfg, project, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.75, maxTokens: 2500, signal },
+    { temperature: 0.75, maxTokens: 3600, signal },
     send
   );
-  const mm = extractMermaid(content);
-  const normalizedContent = mm.code
-    ? content.replace(
-        /```mermaid\s*\n([\s\S]*?)```/i,
-        `\`\`\`mermaid\n${sanitizeMermaid(mm.code)}\n\`\`\``
-      )
-    : content;
+  let normalizedContent = content;
+  const initialMermaid = extractMermaid(content);
+  if (initialMermaid.code) {
+    normalizedContent = content.replace(
+      /```mermaid\s*\n([\s\S]*?)```/i,
+      `\`\`\`mermaid\n${sanitizeMermaid(initialMermaid.code)}\n\`\`\``
+    );
+  } else {
+    send({
+      type: "progress",
+      stage: "repair-output",
+      message: "首轮人物稿缺少关系图，正在补生成 Mermaid …",
+    });
+    const repair = await streamAndCollect(
+      cfg,
+      buildCharactersRepairMessages(project.state, content),
+      { temperature: 0.3, maxTokens: 900, signal },
+      send,
+      { streamPartial: false }
+    );
+    const repairedCode = extractMermaidCode(repair);
+    if (repairedCode) {
+      normalizedContent = attachCharactersMermaid(content, repairedCode);
+    }
+  }
   const normalizedMermaid = extractMermaid(normalizedContent);
   const artifact = saveArtifact({
     projectId: project.id,
@@ -421,6 +458,7 @@ async function runCharacters({ cfg, project, send, signal }: RunCtx) {
     meta: {
       hasMermaid: !!normalizedMermaid.code,
       mermaidChars: normalizedMermaid.code?.length ?? 0,
+      repairedMermaid: !initialMermaid.code && !!normalizedMermaid.code,
     },
   });
   send({

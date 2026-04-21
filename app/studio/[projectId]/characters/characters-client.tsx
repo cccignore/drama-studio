@@ -21,20 +21,29 @@ export function CharactersStepClient({
   const [canAdvance, setCanAdvance] = React.useState<boolean>(!!initialArtifact);
   const [tab, setTab] = React.useState<"cards" | "graph" | "raw">("cards");
 
+  const refreshArtifact = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/artifacts/characters`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const item = json?.data?.item ?? json?.item;
+      if (typeof item?.content === "string") {
+        setSavedContent(item.content);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
   const { run, stop, running, partial, events, error } = useStreamingCommand({
     projectId,
     command: "characters",
-    onDone: () => {
+    onDone: async () => {
+      await refreshArtifact();
       toast.success("人物设计已生成");
       setCanAdvance(true);
     },
   });
-
-  React.useEffect(() => {
-    if (!running && partial && events.some((e) => e.type === "done")) {
-      setSavedContent(partial);
-    }
-  }, [running, partial, events]);
 
   const displayContent = running ? partial : savedContent ?? partial;
   const mermaid = React.useMemo(
