@@ -45,6 +45,7 @@ import {
   parseScreenplay,
   summarizeScreenplay,
 } from "@/lib/drama/parsers/screenplay";
+import { extractContinuityBrief } from "@/lib/drama/parsers/extract-continuity";
 import { extractReviewJson } from "@/lib/drama/parsers/extract-review-json";
 import { extractComplianceJson } from "@/lib/drama/parsers/extract-compliance-json";
 import type { Project } from "@/lib/drama/types";
@@ -578,6 +579,7 @@ async function runEpisode(ctx: RunCtx) {
     }
     const prev = epIdx > 1 ? getLatestArtifact(project.id, `episode-${epIdx - 1}`) : null;
     const prevTail = prev ? extractEpisodeTail(prev.content, 800) : undefined;
+    const prevContinuity = prev ? extractContinuityBrief(prev.content) ?? undefined : undefined;
     const refs = loadRefsForCommand("episode", { episodeIndex: epIdx });
     let storyBeat: string | undefined;
     let polishNotes: string | undefined;
@@ -595,6 +597,7 @@ async function runEpisode(ctx: RunCtx) {
         planSummary: plan.content,
         charactersSummary: characters.content,
         prevEpisodeTail: prevTail,
+        prevContinuity,
         rewriteHint,
         overseasBrief: overseasBrief?.content,
       };
@@ -651,6 +654,7 @@ async function runEpisode(ctx: RunCtx) {
         planSummary: plan.content,
         charactersSummary: characters.content,
         prevEpisodeTail: prevTail,
+        prevContinuity,
         rewriteHint,
         storyBeat,
         polishNotes,

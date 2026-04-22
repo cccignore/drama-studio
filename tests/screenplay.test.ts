@@ -85,6 +85,23 @@ describe("parseScreenplay", () => {
       line: "I have been waiting for you. For three years.",
     });
   });
+
+  it("ignores trailing 连续性检查点 block after 【本集完】", () => {
+    const withCheckpoint = sample + `\n## 连续性检查点
+- 妆发：女主头发微乱
+- 服装：白衬衫袖口染污
+- 关键道具：撕烂的合同
+- 伤痕：左手虎口擦伤
+- 站位：站在门口，背对陆辰
+`;
+    const ast = parseScreenplay(withCheckpoint);
+    // 仍然只有 2 场戏，不会把"连续性检查点"误算成第 3 场
+    expect(ast.scenes).toHaveLength(2);
+    expect(ast.closed).toBe(true);
+    // 也不会把检查点的 bullet 当成对白/动作
+    const allBlocks = ast.scenes.flatMap((s) => s.blocks);
+    expect(allBlocks.find((b) => b.kind === "dialogue" && /妆发|服装/.test(b.role))).toBeUndefined();
+  });
 });
 
 describe("summarizeScreenplay", () => {

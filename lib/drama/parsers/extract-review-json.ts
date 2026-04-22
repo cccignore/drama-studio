@@ -5,6 +5,7 @@ export const ReviewIssueSchema = z.object({
   scene: z.number().int().nullable().optional(),
   desc: z.string().min(1),
   fix: z.string().min(1),
+  rule: z.string().min(1).optional(),
 });
 
 export const ReviewScoresSchema = z.object({

@@ -51,6 +51,11 @@ export function ReviewIssueList({ issues }: Props) {
                   <span className="rounded bg-black/25 px-1.5 py-0.5 text-[11px] font-semibold">
                     {meta.label}
                   </span>
+                  {issue.rule && (
+                    <span className="rounded border border-current/30 px-1.5 py-0.5 text-[10.5px] uppercase tracking-wide opacity-90">
+                      {issue.rule}
+                    </span>
+                  )}
                   {issue.scene != null && (
                     <span className="text-[11px] opacity-75">场 {issue.scene}</span>
                   )}

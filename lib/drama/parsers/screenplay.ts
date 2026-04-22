@@ -48,8 +48,9 @@ export function parseScreenplay(markdown: string): ScreenplayAST {
     if (!line) continue;
 
     if (line.includes("【本集完】") || /【END OF EPISODE】/i.test(line)) {
+      flushScene();
       ast.closed = true;
-      continue;
+      break;
     }
 
     const epM = line.match(EP_RE);

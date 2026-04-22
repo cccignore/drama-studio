@@ -48,4 +48,30 @@ describe("extractReviewJson", () => {
   it("averageScore rounds to 1 decimal", () => {
     expect(averageScore({ pace: 8, satisfy: 7, dialogue: 9, format: 9, coherence: 8 })).toBe(8.2);
   });
+
+  it("accepts the new optional `rule` field on issues", () => {
+    const withRules = {
+      ...valid,
+      issues: [
+        { level: "danger", scene: 1, rule: "R1 局势变化", desc: "场尾未发生变化", fix: "把第 1 场结尾改为决策形成" },
+        { level: "warn", scene: 2, rule: "R11 台词长度", desc: "陆辰台词 38 字", fix: "拆成两句并加一个动作打断" },
+      ],
+    };
+    const result = extractReviewJson(JSON.stringify(withRules));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.issues[0].rule).toBe("R1 局势变化");
+      expect(result.data.issues[1].rule).toMatch(/R11/);
+    }
+  });
+
+  it("still parses legacy issues without the rule field", () => {
+    const legacy = {
+      ...valid,
+      issues: [{ level: "warn", scene: 2, desc: "节奏偏平", fix: "加一个爽点" }],
+    };
+    const result = extractReviewJson(JSON.stringify(legacy));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.issues[0].rule).toBeUndefined();
+  });
 });
