@@ -1,6 +1,7 @@
 import type { LLMConfig, LLMMessage, LLMStreamEvent, LLMCallOptions } from "../types";
 import { iterSSELines } from "../sse-parse";
 import { friendlyNetworkError, friendlyUpstreamError } from "../provider-error";
+import { fetchWithRetry } from "../retry";
 
 /**
  * Anthropic-compatible /v1/messages streaming endpoint.
@@ -32,7 +33,18 @@ export async function* streamAnthropicCompat(
 
   let res: Response;
   try {
-    res = await fetch(url, { method: "POST", headers, body, signal: opts.signal });
+    res = await fetchWithRetry(
+      url,
+      { method: "POST", headers, body, signal: opts.signal },
+      {
+        signal: opts.signal,
+        onRetry: ({ attempt, delayMs, reason }) => {
+          console.warn(
+            `[llm-retry] ${cfg.name} (${cfg.model}) attempt ${attempt} in ${delayMs}ms · ${reason}`
+          );
+        },
+      }
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     yield { type: "error", message: friendlyNetworkError(msg) };
