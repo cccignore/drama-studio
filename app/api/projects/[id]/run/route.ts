@@ -21,12 +21,14 @@ import {
   saveArtifact,
 } from "@/lib/drama/artifacts";
 import { buildStartMessages, type StartArgs } from "@/lib/drama/prompts/start";
+import { buildCreativeMessages } from "@/lib/drama/prompts/creative";
 import { buildPlanMessages } from "@/lib/drama/prompts/plan";
 import { buildCharactersMessages } from "@/lib/drama/prompts/characters";
 import { buildCharactersRepairMessages } from "@/lib/drama/prompts/characters-repair";
 import { buildOutlineMessages } from "@/lib/drama/prompts/outline";
 import { buildEpisodeMessages } from "@/lib/drama/prompts/episode";
 import { buildReviewMessages } from "@/lib/drama/prompts/review";
+import { buildStoryboardMessages } from "@/lib/drama/prompts/storyboard";
 import { buildOverseasMessages } from "@/lib/drama/prompts/overseas";
 import { buildComplianceMessages } from "@/lib/drama/prompts/compliance";
 import {
@@ -48,6 +50,12 @@ import {
 import { extractContinuityBrief } from "@/lib/drama/parsers/extract-continuity";
 import { extractReviewJson } from "@/lib/drama/parsers/extract-review-json";
 import { extractComplianceJson } from "@/lib/drama/parsers/extract-compliance-json";
+import {
+  extractCreative,
+  formatCreativeBrief,
+  summarizeCreative,
+} from "@/lib/drama/parsers/extract-creative";
+import { parseStoryboard, summarizeStoryboard } from "@/lib/drama/parsers/storyboard";
 import type { Project } from "@/lib/drama/types";
 import type { LLMConfig, LLMMessage } from "@/lib/llm/types";
 
@@ -114,6 +122,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             await runPing(ctx);
           } else if (command === "start") {
             await runStart(ctx);
+          } else if (command === "creative") {
+            await runCreative(ctx);
           } else if (command === "plan") {
             await runPlan(ctx);
           } else if (command === "characters") {
@@ -124,6 +134,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             await runEpisode(ctx);
           } else if (command === "review") {
             await runReview(ctx);
+          } else if (command === "storyboard") {
+            await runStoryboard(ctx);
           } else if (command === "overseas") {
             await runOverseas(ctx);
           } else if (command === "compliance") {
@@ -137,11 +149,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             return;
           }
 
-          // episode / review handle state advancement themselves (multi-run commands)
+          // episode / review / storyboard handle state advancement themselves (multi-run commands)
           if (
             command !== "ping" &&
             command !== "episode" &&
             command !== "review" &&
+            command !== "storyboard" &&
             COMMAND_TO_STEP[command]
           ) {
             const fresh = getProject(id);
@@ -223,6 +236,14 @@ function excerptForCompliance(content: string, maxChars = 2200): string {
   const head = trimmed.slice(0, Math.floor(maxChars * 0.6));
   const tail = trimmed.slice(-Math.floor(maxChars * 0.28));
   return `${head}\n\n[...中段已截断...]\n\n${tail}`;
+}
+
+function readCreativeBrief(projectId: string): string | undefined {
+  const creative = getLatestArtifact(projectId, "creative");
+  if (!creative) return undefined;
+  const art = extractCreative(creative.content);
+  const brief = formatCreativeBrief(art, 1200);
+  return brief.trim() || undefined;
 }
 
 function extractMermaidCode(text: string): string | null {
@@ -344,11 +365,57 @@ async function runStart({ cfg, project, args, send, signal }: RunCtx) {
   send({ type: "artifact", name: "start-card", version: artifact.version, length: content.length });
 }
 
+async function runCreative({ cfg, project, args, send, signal }: RunCtx) {
+  const startCard = getLatestArtifact(project.id, "start-card");
+  // 允许用户绕过立项卡：直接从 args.brief 或 state.freeText 起手
+  const briefFromArgs = typeof args?.brief === "string" ? (args.brief as string).trim() : "";
+  const brief = briefFromArgs || startCard?.content || project.state.freeText || "";
+  if (!brief.trim()) {
+    throw new Error("请先完成 /start 或在参数里传入一句话题材 brief");
+  }
+  send({ type: "progress", stage: "compose-prompt", message: "整合立项信息并起草三幕创意 …" });
+  const refs = loadRefsForCommand("creative");
+  const messages = buildCreativeMessages(
+    project.state,
+    { brief, freeText: project.state.freeText },
+    refs
+  );
+  send({ type: "progress", stage: "calling-llm", message: `正在调用 ${cfg.name} 生成三幕创意方案 …` });
+  const content = await streamAndCollect(
+    cfg,
+    messages,
+    { temperature: 0.8, maxTokens: 2400, signal },
+    send
+  );
+  const art = extractCreative(content);
+  const stats = summarizeCreative(art);
+  const artifact = saveArtifact({
+    projectId: project.id,
+    name: "creative",
+    content,
+    meta: {
+      title: art.title,
+      audience: art.audience,
+      genre: art.genre,
+      coreTheme: art.coreTheme,
+      ...stats,
+    },
+  });
+  send({
+    type: "artifact",
+    name: "creative",
+    version: artifact.version,
+    length: content.length,
+    ...stats,
+  });
+}
+
 async function runPlan({ cfg, project, send, signal }: RunCtx) {
   const startCard = getLatestArtifact(project.id, "start-card");
   if (!startCard) throw new Error("缺少立项卡，请先完成 /start");
   send({ type: "progress", stage: "compose-prompt", message: "加载节奏曲线与付费策略参考 …" });
   const refs = loadRefsForCommand("plan");
+  const creativeBrief = readCreativeBrief(project.id);
   let plannerBrief: string | undefined;
   let criticNotes: string | undefined;
 
@@ -360,7 +427,7 @@ async function runPlan({ cfg, project, send, signal }: RunCtx) {
     });
     plannerBrief = await runAgentTask({
       cfg: resolveConfigForCommand("plan", project.id) ?? cfg,
-      messages: buildPlanPlannerMessages(project.state, startCard.content, refs),
+      messages: buildPlanPlannerMessages(project.state, startCard.content, refs, { creativeBrief }),
       send,
       signal,
       role: "planner",
@@ -383,6 +450,7 @@ async function runPlan({ cfg, project, send, signal }: RunCtx) {
   const messages = buildPlanMessages(project.state, startCard.content, refs, {
     plannerBrief,
     criticNotes,
+    creativeBrief,
   });
   send({ type: "progress", stage: "calling-llm", message: `正在调用 ${cfg.name} 设计节奏 …` });
   send({
@@ -433,7 +501,10 @@ async function runCharacters({ cfg, project, send, signal }: RunCtx) {
   if (!startCard || !plan) throw new Error("请先完成 /start 与 /plan");
   send({ type: "progress", stage: "compose-prompt", message: "加载反派设计参考 …" });
   const refs = loadRefsForCommand("characters");
-  const messages = buildCharactersMessages(project.state, startCard.content, plan.content, refs);
+  const creativeBrief = readCreativeBrief(project.id);
+  const messages = buildCharactersMessages(project.state, startCard.content, plan.content, refs, {
+    creativeBrief,
+  });
   send({ type: "progress", stage: "calling-llm", message: `正在调用 ${cfg.name} 生成人物设计 …` });
   const content = await streamAndCollect(
     cfg,
@@ -493,12 +564,14 @@ async function runOutline({ cfg, project, send, signal }: RunCtx) {
   if (!startCard || !plan || !characters) throw new Error("请先完成前三步");
   send({ type: "progress", stage: "compose-prompt", message: "加载付费卡点与节奏参考 …" });
   const refs = loadRefsForCommand("outline");
+  const creativeBrief = readCreativeBrief(project.id);
   const messages = buildOutlineMessages(
     project.state,
     startCard.content,
     plan.content,
     characters.content,
-    refs
+    refs,
+    { creativeBrief }
   );
   send({ type: "progress", stage: "calling-llm", message: `正在调用 ${cfg.name} 生成分集目录 …` });
   const content = await streamAndCollect(
@@ -569,6 +642,7 @@ async function runEpisode(ctx: RunCtx) {
     project.state.mode === "overseas"
       ? getLatestArtifact(project.id, "overseas-brief")
       : null;
+  const creativeBrief = readCreativeBrief(project.id);
 
   for (const epIdx of targets) {
     if (signal.aborted) throw new Error("已取消");
@@ -600,6 +674,7 @@ async function runEpisode(ctx: RunCtx) {
         prevContinuity,
         rewriteHint,
         overseasBrief: overseasBrief?.content,
+        creativeBrief,
       };
       storyBeat = await runAgentTask({
         cfg: resolveConfigForCommand("episode", project.id) ?? cfg,
@@ -659,6 +734,7 @@ async function runEpisode(ctx: RunCtx) {
         storyBeat,
         polishNotes,
         overseasBrief: overseasBrief?.content,
+        creativeBrief,
       },
       refs
     );
@@ -846,6 +922,107 @@ async function runReview(ctx: RunCtx) {
     send({ type: "state", state: nextState });
   } else if (fresh) {
     send({ type: "state", state: fresh.state, reviewed: reviewed.length, total: totalExpected });
+  }
+}
+
+function resolveStoryboardTargets(args: Record<string, unknown>, episodeIdxs: number[]): number[] {
+  if (episodeIdxs.length === 0) return [];
+  const mode = (args.mode as string | undefined) ?? "single";
+  if (mode === "all") return [...episodeIdxs];
+  if (mode === "range") {
+    const from = Number(args.from) || episodeIdxs[0];
+    const to = Number(args.to) || from;
+    return episodeIdxs.filter((i) => i >= from && i <= to);
+  }
+  const idx = Number(args.index);
+  if (!Number.isFinite(idx) || idx < 1) throw new Error("storyboard 参数缺少 index");
+  if (!episodeIdxs.includes(idx)) throw new Error(`第 ${idx} 集尚未写成`);
+  return [idx];
+}
+
+async function runStoryboard(ctx: RunCtx) {
+  const { cfg, project, args, send, signal } = ctx;
+  const outline = getLatestArtifact(project.id, "outline");
+  const episodeIdxs = getEpisodeIndices(project.id);
+  const targets = resolveStoryboardTargets(args, episodeIdxs);
+  if (targets.length === 0) {
+    send({ type: "progress", stage: "noop", message: "没有可拆分镜的集数" });
+    return;
+  }
+  const refs = loadRefsForCommand("storyboard");
+
+  for (const epIdx of targets) {
+    if (signal.aborted) throw new Error("已取消");
+    const ep = getLatestArtifact(project.id, `episode-${epIdx}`);
+    if (!ep) {
+      send({ type: "progress", stage: "skip", message: `第 ${epIdx} 集未写，跳过` });
+      continue;
+    }
+    const epOutline = outline ? extractEpisodeOutline(outline.content, epIdx) : undefined;
+    send({
+      type: "progress",
+      stage: "calling-llm",
+      message: `正在拆分第 ${epIdx} 集分镜（${cfg.name}）…`,
+      episode: epIdx,
+    });
+    send({
+      type: "agent",
+      status: "start",
+      role: "writer",
+      title: "Writer 分镜脚本",
+      model: cfg.name,
+      episode: epIdx,
+    });
+    const messages = buildStoryboardMessages(
+      project.state,
+      {
+        episodeIndex: epIdx,
+        episodeScreenplay: ep.content,
+        episodeOutline: epOutline || undefined,
+      },
+      refs
+    );
+    const content = await streamAndCollect(
+      cfg,
+      messages,
+      { temperature: 0.5, maxTokens: 4200, signal },
+      send
+    );
+    const doc = parseStoryboard(content);
+    const stats = summarizeStoryboard(doc);
+    send({
+      type: "agent",
+      status: "done",
+      role: "writer",
+      title: "Writer 分镜脚本",
+      model: cfg.name,
+      episode: epIdx,
+      chars: content.length,
+      preview: summarizePreview(content),
+    });
+    const artifact = saveArtifact({
+      projectId: project.id,
+      name: `storyboard-${epIdx}`,
+      content,
+      meta: { episodeIndex: epIdx, ...stats },
+    });
+    send({
+      type: "artifact",
+      name: `storyboard-${epIdx}`,
+      version: artifact.version,
+      length: content.length,
+      episode: epIdx,
+      stats,
+    });
+  }
+
+  const fresh = getProject(project.id);
+  if (fresh && fresh.state.currentStep !== "storyboard" && fresh.state.currentStep !== "export" && fresh.state.currentStep !== "done") {
+    const promoted = promoteStep(fresh.state, "storyboard");
+    updateProject(project.id, { state: promoted });
+    send({ type: "state", state: promoted });
+  } else if (fresh) {
+    send({ type: "state", state: fresh.state });
   }
 }
 

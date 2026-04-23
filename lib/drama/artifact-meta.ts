@@ -4,6 +4,8 @@ import { extractPlanCurve } from "./parsers/extract-plan-curve";
 import { parseScreenplay, summarizeScreenplay } from "./parsers/screenplay";
 import { extractReviewJson } from "./parsers/extract-review-json";
 import { extractComplianceJson } from "./parsers/extract-compliance-json";
+import { extractCreative, summarizeCreative } from "./parsers/extract-creative";
+import { parseStoryboard, summarizeStoryboard } from "./parsers/storyboard";
 
 export function normalizeArtifactContent(name: string, content: string): string {
   if (name !== "characters") return content;
@@ -83,5 +85,23 @@ export function buildArtifactMeta(name: string, content: string): Record<string,
     };
   }
   if (name === "overseas-brief") return { mode: "overseas", language: "bilingual" };
+  if (name === "creative") {
+    const art = extractCreative(content);
+    return {
+      title: art.title,
+      audience: art.audience,
+      genre: art.genre,
+      coreTheme: art.coreTheme,
+      ...summarizeCreative(art),
+    };
+  }
+  const storyboardMatch = name.match(/^storyboard-(\d+)$/);
+  if (storyboardMatch) {
+    const doc = parseStoryboard(content);
+    return {
+      episodeIndex: Number(storyboardMatch[1]),
+      ...summarizeStoryboard(doc),
+    };
+  }
   return null;
 }

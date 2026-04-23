@@ -6,9 +6,10 @@ function section(title: string, body: string | null | undefined): string {
 }
 
 export function renderProjectMarkdown(bundle: ExportBundle): string {
-  const { project, startCard, plan, characters, outline, episodes, reviews } = bundle;
+  const { project, startCard, creative, plan, characters, outline, episodes, reviews, storyboards } = bundle;
   const state = project.state;
   const reviewByIdx = new Map(reviews.map((r) => [r.index, r.artifact]));
+  const sbByIdx = new Map(storyboards.map((s) => [s.index, s.artifact]));
 
   const header = [
     `# ${project.title || state.dramaTitle || "未命名短剧"}`,
@@ -25,6 +26,7 @@ export function renderProjectMarkdown(bundle: ExportBundle): string {
   const parts = [
     header,
     section("立项卡", startCard?.content),
+    section("三幕创意方案", creative?.content),
     section("节奏规划", plan?.content),
     section("人物设计", characters?.content),
     section("分集目录", outline?.content),
@@ -43,6 +45,12 @@ export function renderProjectMarkdown(bundle: ExportBundle): string {
       parts.push("```");
       parts.push("");
     }
+    const sb = sbByIdx.get(index);
+    if (sb) {
+      parts.push(`#### 第 ${index} 集 · 分镜脚本`);
+      parts.push(sb.content.trim());
+      parts.push("");
+    }
   }
 
   return parts.filter(Boolean).join("\n");
@@ -55,9 +63,13 @@ export function renderEpisodeMarkdown(
   const ep = bundle.episodes.find((e) => e.index === episodeIndex);
   if (!ep) return `# 第 ${episodeIndex} 集\n\n（尚未写成）\n`;
   const rv = bundle.reviews.find((r) => r.index === episodeIndex);
+  const sb = bundle.storyboards.find((s) => s.index === episodeIndex);
   const out = [`# ${bundle.project.title} · 第 ${episodeIndex} 集\n`, ep.artifact.content.trim()];
   if (rv) {
     out.push("\n## 复盘结果", "```json", rv.artifact.content.trim(), "```");
+  }
+  if (sb) {
+    out.push("\n## 分镜脚本", sb.artifact.content.trim());
   }
   return out.join("\n");
 }

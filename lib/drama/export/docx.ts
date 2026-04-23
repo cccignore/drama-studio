@@ -11,6 +11,7 @@ import type { ExportBundle } from "./collect";
 import { parseScreenplay, type ScreenplayAST } from "../parsers/screenplay";
 import type { ReviewResult } from "../parsers/extract-review-json";
 import { extractReviewJson } from "../parsers/extract-review-json";
+import { parseStoryboard, type StoryboardDoc } from "../parsers/storyboard";
 
 function h(text: string, level: (typeof HeadingLevel)[keyof typeof HeadingLevel]): Paragraph {
   return new Paragraph({
@@ -106,8 +107,46 @@ function renderReview(review: ReviewResult, episodeIndex: number): Paragraph[] {
   return out;
 }
 
+function renderStoryboard(doc: StoryboardDoc, episodeIndex: number): Paragraph[] {
+  const out: Paragraph[] = [];
+  out.push(h(`第 ${episodeIndex} 集 · 分镜脚本`, HeadingLevel.HEADING_2));
+  if (doc.shots.length === 0) {
+    out.push(p("（未解析到分镜镜头）", { italic: true }));
+    return out;
+  }
+  let lastScene = -1;
+  for (const shot of doc.shots) {
+    if (shot.scene !== lastScene) {
+      out.push(h(`场 ${shot.scene}`, HeadingLevel.HEADING_3));
+      lastScene = shot.scene;
+    }
+    const meta = [
+      shot.shotType,
+      shot.camera,
+      shot.durationSec != null ? `${shot.durationSec}s` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    out.push(
+      new Paragraph({
+        spacing: { after: 40 },
+        children: [
+          new TextRun({ text: `#${shot.shotId} `, bold: true }),
+          new TextRun({ text: meta, italics: true, color: "555555" }),
+        ],
+      })
+    );
+    if (shot.description) out.push(p(`画面：${shot.description}`, { indent: 300 }));
+    if (shot.dialogueOrSfx && !/^(—|-|\s*)$/.test(shot.dialogueOrSfx)) {
+      out.push(p(`台词/SFX：${shot.dialogueOrSfx}`, { indent: 300 }));
+    }
+    if (shot.note) out.push(p(`备注：${shot.note}`, { indent: 300, italic: true }));
+  }
+  return out;
+}
+
 export async function buildProjectDocx(bundle: ExportBundle): Promise<Uint8Array> {
-  const { project, outline, episodes, reviews } = bundle;
+  const { project, creative, outline, episodes, reviews, storyboards } = bundle;
   const state = project.state;
 
   const body: Paragraph[] = [];
@@ -126,6 +165,17 @@ export async function buildProjectDocx(bundle: ExportBundle): Promise<Uint8Array
   );
   body.push(p(`导出时间 ${new Date().toLocaleString("zh-CN")}`, { italic: true }));
 
+  if (creative) {
+    body.push(new Paragraph({ children: [new PageBreak()] }));
+    body.push(h("三幕创意方案", HeadingLevel.HEADING_1));
+    for (const line of creative.content.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      if (/^##\s+/.test(line)) body.push(h(line.replace(/^##\s+/, ""), HeadingLevel.HEADING_2));
+      else if (/^###\s+/.test(line)) body.push(h(line.replace(/^###\s+/, ""), HeadingLevel.HEADING_3));
+      else body.push(p(line));
+    }
+  }
+
   if (outline) {
     body.push(new Paragraph({ children: [new PageBreak()] }));
     body.push(h("分集目录", HeadingLevel.HEADING_1));
@@ -143,6 +193,10 @@ export async function buildProjectDocx(bundle: ExportBundle): Promise<Uint8Array
     const parsed = extractReviewJson(r.artifact.content);
     if (parsed.ok) reviewByIdx.set(r.index, parsed.data);
   }
+  const sbByIdx = new Map<number, StoryboardDoc>();
+  for (const s of storyboards) {
+    sbByIdx.set(s.index, parseStoryboard(s.artifact.content));
+  }
 
   for (const { index, artifact } of episodes) {
     body.push(new Paragraph({ children: [new PageBreak()] }));
@@ -150,6 +204,8 @@ export async function buildProjectDocx(bundle: ExportBundle): Promise<Uint8Array
     body.push(...renderScreenplayAst(ast, index));
     const rv = reviewByIdx.get(index);
     if (rv) body.push(...renderReview(rv, index));
+    const sb = sbByIdx.get(index);
+    if (sb) body.push(...renderStoryboard(sb, index));
   }
 
   const doc = new Document({
@@ -187,6 +243,10 @@ export async function buildEpisodeDocx(
   if (rv) {
     const parsed = extractReviewJson(rv.artifact.content);
     if (parsed.ok) body.push(...renderReview(parsed.data, episodeIndex));
+  }
+  const sb = bundle.storyboards.find((s) => s.index === episodeIndex);
+  if (sb) {
+    body.push(...renderStoryboard(parseStoryboard(sb.artifact.content), episodeIndex));
   }
   const doc = new Document({ creator: "drama-studio", sections: [{ children: body }] });
   const buf = await Packer.toBuffer(doc);
