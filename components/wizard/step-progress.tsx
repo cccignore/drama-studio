@@ -7,7 +7,17 @@ import { cn } from "@/lib/utils";
 import type { DramaStep } from "@/lib/drama/types";
 import { STEP_LABEL, stepIndex } from "@/lib/drama/state-machine";
 
-const VISIBLE: DramaStep[] = ["start", "plan", "characters", "outline", "episode", "review", "export"];
+const VISIBLE: DramaStep[] = [
+  "start",
+  "creative",
+  "plan",
+  "characters",
+  "outline",
+  "episode",
+  "review",
+  "storyboard",
+  "export",
+];
 
 export function StepProgress({
   projectId,

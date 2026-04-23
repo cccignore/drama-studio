@@ -4,6 +4,7 @@ import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageTransition } from "@/components/layout/page-transition";
 import { StepProgress } from "@/components/wizard/step-progress";
 import { ProjectControlsPanel } from "@/components/drama/project-controls-panel";
+import { ArtifactIOBar } from "@/components/drama/artifact-io-bar";
 import { getProject } from "@/lib/drama/store";
 import { deriveMaxAccessibleStep, STEP_LABEL } from "@/lib/drama/state-machine";
 import { getEpisodeIndices, getReviewIndices } from "@/lib/drama/artifacts";
@@ -60,6 +61,7 @@ export default async function StudioLayout({
           currentStep={project.state.currentStep}
           maxAccessibleStep={maxAccessibleStep}
         />
+        <ArtifactIOBar projectId={project.id} />
         <PageTransition>{children}</PageTransition>
       </div>
     </DashboardShell>
