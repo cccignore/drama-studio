@@ -6,7 +6,8 @@ export function buildCharactersMessages(
   state: DramaState,
   startCard: string,
   plan: string,
-  refs: string
+  refs: string,
+  opts?: { creativeBrief?: string }
 ): LLMMessage[] {
   const user = [
     "【任务】根据立项卡与节奏规划，产出完整的**人物卡 + 人物关系图**。",
@@ -16,6 +17,9 @@ export function buildCharactersMessages(
     "",
     "【立项卡摘要】",
     startCard.slice(0, 1500) || "（暂缺）",
+    "",
+    opts?.creativeBrief ? "【三幕创意方案（必须贴合）】" : "",
+    opts?.creativeBrief ?? "",
     "",
     "【节奏规划摘要】",
     plan.slice(0, 1500) || "（暂缺）",

@@ -5,6 +5,8 @@ import { SYSTEM_PERSONA, contextBlock, refsBlock } from "./_shared";
 export interface PlanAgentContext {
   plannerBrief?: string;
   criticNotes?: string;
+  /** /creative 阶段产出的三幕方案摘要，优先遵循其世界观、Act 结构、核心主题 */
+  creativeBrief?: string;
 }
 
 export function buildPlanMessages(
@@ -21,6 +23,9 @@ export function buildPlanMessages(
     "",
     "【立项卡全文】",
     startCard || "（尚未生成立项卡）",
+    "",
+    agentContext?.creativeBrief ? "【三幕创意方案（必须贴合，不得偏离 Act 结构与核心主题）】" : "",
+    agentContext?.creativeBrief ?? "",
     "",
     agentContext?.plannerBrief ? "【Planner 节奏骨架草案】" : "",
     agentContext?.plannerBrief ?? "",

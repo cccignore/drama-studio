@@ -1,6 +1,7 @@
 import type { DramaState } from "../types";
 import type { LLMMessage } from "../../llm/types";
 import { SYSTEM_PERSONA, contextBlock, refsBlock } from "./_shared";
+import { getEpisodeBudget } from "../episode-budget";
 
 export interface EpisodeContext {
   episodeIndex: number;
@@ -13,6 +14,7 @@ export interface EpisodeContext {
   storyBeat?: string;               // multi-agent: Planner 产出的 beat sheet
   polishNotes?: string;             // multi-agent: Critic 产出的修正意见
   overseasBrief?: string;           // /overseas 产出的文化适配 brief
+  creativeBrief?: string;           // /creative 三幕方案摘要（世界观 + Act 拐点 + 核心主题）
 }
 
 export function buildEpisodeMessages(
@@ -23,6 +25,7 @@ export function buildEpisodeMessages(
   const isFirst = ctx.episodeIndex === 1;
   const hasPrev = !isFirst && ctx.prevEpisodeTail;
   const isOverseas = state.mode === "overseas";
+  const budget = getEpisodeBudget(state.mode);
 
   const outputRequirements = isOverseas
     ? [
@@ -85,8 +88,8 @@ export function buildEpisodeMessages(
 
   const user = [
     isOverseas
-      ? `【任务】写第 ${ctx.episodeIndex} 集完整剧本（2-3 分钟，中文场记 + 英文对白，海外平台友好节奏）。`
-      : `【任务】写第 ${ctx.episodeIndex} 集完整剧本（单集时长 2-3 分钟，约 900-1400 字）。`,
+      ? `【任务】写第 ${ctx.episodeIndex} 集完整剧本（单集 ${budget.secMin}-${budget.secMax} 秒，中文场记 + 英文对白约 ${budget.enMin}-${budget.enMax} 词，海外平台节奏）。`
+      : `【任务】写第 ${ctx.episodeIndex} 集完整剧本（单集 ${budget.secMin}-${budget.secMax} 秒，约 ${budget.cnMin}-${budget.cnMax} 字）。`,
     "",
     "【项目信息】",
     contextBlock(state),
@@ -96,6 +99,9 @@ export function buildEpisodeMessages(
     "",
     "【主要人物（摘要）】",
     ctx.charactersSummary.slice(0, 1500) || "（暂缺）",
+    "",
+    ctx.creativeBrief ? "【三幕创意方案（本集必须落在正确的 Act 与核心主题里）】" : "",
+    ctx.creativeBrief ?? "",
     "",
     ctx.overseasBrief ? "【出海适配约束】" : "",
     ctx.overseasBrief ? ctx.overseasBrief.slice(0, 1500) : "",
@@ -164,8 +170,8 @@ export function buildEpisodeMessages(
       ? "3) 结尾 30 秒必须释放小爽点并抛新悬念，或在付费卡点情绪最高处硬切。"
       : "3) 结尾 30 秒：" + (isPaywallEp(ctx.episodeOutline) ? "**必须**在情绪最高点硬切（付费卡点），结尾一行用 `【本集完】`。" : "释放一次小爽点 + 抛新悬念。"),
     isOverseas
-      ? "4) 英文对白必须 tight and platform-friendly；禁止长独白；避免海外观众无法理解的本土梗。"
-      : "4) 台词短平快，禁止长独白。每句台词原则上不超过 25 字，超过必须走上面的 7 级拆解。",
+      ? `4) 英文对白必须 tight and platform-friendly；每句台词原则上 ≤${budget.lineMaxEn} 词；禁止长独白；避免海外观众无法理解的本土梗。`
+      : `4) 台词短平快，禁止长独白。每句台词原则上不超过 ${budget.lineMaxCn} 字，超过必须走上面的 7 级拆解。`,
     "5) 禁止使用开发者注释 / 代码块 / 任何 JSON。",
     isOverseas
       ? "6) 人名、关系与情绪动机必须对全球观众清晰。严格吸收出海适配 brief 的命名、场景和对白风格要求。"

@@ -6,7 +6,8 @@ import type { EpisodeContext } from "./episode";
 export function buildPlanPlannerMessages(
   state: DramaState,
   startCard: string,
-  refs: string
+  refs: string,
+  opts?: { creativeBrief?: string }
 ): LLMMessage[] {
   const user = [
     "【角色】你是 Planner。先不要输出最终交付稿，只负责给出节奏骨架草案。",
@@ -16,6 +17,9 @@ export function buildPlanPlannerMessages(
     "",
     "【立项卡】",
     startCard,
+    "",
+    opts?.creativeBrief ? "【三幕创意方案（骨架必须贴合 Act 拐点与核心主题）】" : "",
+    opts?.creativeBrief ?? "",
     "",
     refsBlock(refs),
     "",
@@ -76,6 +80,9 @@ export function buildEpisodePlannerMessages(
     "",
     "【主要人物】",
     ctx.charactersSummary.slice(0, 1200),
+    "",
+    ctx.creativeBrief ? "【三幕创意方案（本集要落到对的 Act 与核心主题里）】" : "",
+    ctx.creativeBrief ?? "",
     "",
     ctx.overseasBrief ? "【出海适配约束】" : "",
     ctx.overseasBrief ? ctx.overseasBrief.slice(0, 1200) : "",

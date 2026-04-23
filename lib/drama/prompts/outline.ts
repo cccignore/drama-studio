@@ -7,7 +7,8 @@ export function buildOutlineMessages(
   startCard: string,
   plan: string,
   characters: string,
-  refs: string
+  refs: string,
+  opts?: { creativeBrief?: string }
 ): LLMMessage[] {
   const user = [
     "【任务】产出完整的**分集目录**（全剧）。",
@@ -17,6 +18,9 @@ export function buildOutlineMessages(
     "",
     "【立项卡摘要】",
     startCard.slice(0, 1200),
+    "",
+    opts?.creativeBrief ? "【三幕创意方案（必须贴合 Act1/2/3 的拐点与钩子）】" : "",
+    opts?.creativeBrief ?? "",
     "",
     "【节奏规划摘要】",
     plan.slice(0, 1500),

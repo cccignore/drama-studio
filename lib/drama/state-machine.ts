@@ -2,39 +2,46 @@ import type { DramaStep, DramaState } from "./types";
 
 export const STEP_ORDER: DramaStep[] = [
   "start",
+  "creative",
   "plan",
   "characters",
   "outline",
   "episode",
   "review",
+  "storyboard",
   "export",
   "done",
 ];
 
 export const STEP_LABEL: Record<DramaStep, string> = {
   start: "立项",
+  creative: "三幕创意",
   plan: "节奏",
   characters: "角色",
   outline: "分集",
   episode: "剧本",
   review: "复盘",
+  storyboard: "分镜",
   export: "导出",
   done: "完成",
 };
 
 export const COMMAND_TO_STEP: Record<string, DramaStep> = {
   start: "start",
+  creative: "creative",
   plan: "plan",
   characters: "characters",
   outline: "outline",
   episode: "episode",
   review: "review",
+  storyboard: "storyboard",
   export: "export",
 };
 
 export interface StepProgressContext {
   writtenEpisodes?: number;
   reviewedEpisodes?: number;
+  storyboardedEpisodes?: number;
 }
 
 export function stepIndex(step: DramaStep): number {
@@ -88,6 +95,9 @@ export function canRunCommand(
   const target = COMMAND_TO_STEP[command];
   if (!target) return { ok: false, reason: `未知命令：${command}` };
   if (command === "review" && (ctx.writtenEpisodes ?? 0) > 0) {
+    return { ok: true };
+  }
+  if (command === "storyboard" && (ctx.writtenEpisodes ?? 0) > 0) {
     return { ok: true };
   }
   const required = stepIndex(target);

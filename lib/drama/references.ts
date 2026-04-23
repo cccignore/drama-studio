@@ -5,11 +5,13 @@ const REF_DIR = path.join(process.cwd(), "references");
 
 export const REF_MAP: Record<string, string[]> = {
   start: ["genre-guide"],
+  creative: ["genre-guide", "hook-design"],
   plan: ["opening-rules", "paywall-design", "rhythm-curve", "satisfaction-matrix"],
   characters: ["villain-design"],
   outline: ["paywall-design", "rhythm-curve", "hook-design"],
   episode: ["rhythm-curve", "satisfaction-matrix", "hook-design"],
   review: ["rhythm-curve", "hook-design", "satisfaction-matrix"],
+  storyboard: [],
   overseas: ["genre-guide", "hook-design", "hollywood-bilingual"],
   compliance: ["compliance-checklist"],
 };

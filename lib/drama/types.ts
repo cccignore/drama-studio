@@ -1,10 +1,12 @@
 export type DramaStep =
   | "start"
+  | "creative"
   | "plan"
   | "characters"
   | "outline"
   | "episode"
   | "review"
+  | "storyboard"
   | "export"
   | "done";
 
