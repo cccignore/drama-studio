@@ -133,9 +133,9 @@ export function StartStepClient({
             />
           )}
           {canAdvance && !running && (
-            <Link href={`/studio/${projectId}/plan`}>
+            <Link href={`/studio/${projectId}/creative`}>
               <Button variant="secondary">
-                进入下一步 · 节奏
+                进入下一步 · 三幕创意
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>

@@ -152,10 +152,10 @@ export function ReviewStepClient({
           <Button
             variant="secondary"
             disabled={!canProceed}
-            onClick={() => router.push(`/studio/${projectId}/export`)}
-            title={canProceed ? "进入导出" : "至少写完 1 集后可进入导出"}
+            onClick={() => router.push(`/studio/${projectId}/storyboard`)}
+            title={canProceed ? "进入分镜" : "至少写完 1 集后可进入分镜"}
           >
-            进入导出 <ArrowRight className="h-4 w-4" />
+            进入下一步 · 分镜 <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
       </header>
