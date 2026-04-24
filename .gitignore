@@ -2,6 +2,8 @@ node_modules
 .next
 out
 .data
+data
+.backup
 *.db
 *.db-journal
 .env
