@@ -66,3 +66,39 @@ CREATE TABLE IF NOT EXISTS step_conversations (
   ts              INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stepconv_project ON step_conversations(project_id, artifact_name, ts);
+
+CREATE TABLE IF NOT EXISTS batch_projects (
+  id             TEXT PRIMARY KEY,
+  title          TEXT NOT NULL,
+  source_text    TEXT NOT NULL,
+  target_market  TEXT NOT NULL DEFAULT 'overseas',
+  total_episodes INTEGER NOT NULL DEFAULT 30,
+  status         TEXT NOT NULL DEFAULT 'draft',
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS batch_items (
+  id                    TEXT PRIMARY KEY,
+  batch_id              TEXT NOT NULL,
+  source_title          TEXT,
+  source_keywords       TEXT,
+  source_summary        TEXT,
+  source_text           TEXT,
+  title                 TEXT,
+  one_liner             TEXT,
+  creative_md           TEXT,
+  screenplay_md         TEXT,
+  storyboard_md         TEXT,
+  idea_selected         INTEGER NOT NULL DEFAULT 1,
+  creative_selected     INTEGER NOT NULL DEFAULT 1,
+  screenplay_selected   INTEGER NOT NULL DEFAULT 1,
+  status                TEXT NOT NULL DEFAULT 'source_ready',
+  error                 TEXT,
+  meta_json             TEXT,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL,
+  FOREIGN KEY(batch_id) REFERENCES batch_projects(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_batch_items_status ON batch_items(batch_id, status);

@@ -3,7 +3,7 @@ import * as React from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { ArrowRight, Compass, Loader2, Plus, Settings, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Compass, Factory, Loader2, Plus, Settings, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -137,6 +137,12 @@ export function StudioListClient() {
               <Button variant="secondary" size="sm">
                 <Settings className="h-4 w-4" />
                 配置模型
+              </Button>
+            </Link>
+            <Link href="/studio/batch">
+              <Button variant="secondary" size="sm">
+                <Factory className="h-4 w-4" />
+                红果批量工厂
               </Button>
             </Link>
             <Button variant="ghost" size="sm" onClick={() => setTourOpen(true)}>

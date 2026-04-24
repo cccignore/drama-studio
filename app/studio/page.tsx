@@ -1,5 +1,5 @@
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import { Cog, FolderKanban, Terminal } from "lucide-react";
+import { Cog, Factory, FolderKanban, Terminal } from "lucide-react";
 import { StudioListClient } from "./studio-list-client";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ export default function StudioListPage() {
           icon: <FolderKanban className="h-4 w-4" />,
           active: true,
         },
+        { label: "红果批量工厂", href: "/studio/batch", icon: <Factory className="h-4 w-4" /> },
         { label: "模型设置", href: "/settings/models", icon: <Cog className="h-4 w-4" /> },
         { label: "首页", href: "/", icon: <Terminal className="h-4 w-4" /> },
       ]}
