@@ -10,6 +10,7 @@ interface Props {
 }
 
 type Format = "md" | "docx" | "zip";
+type ExportKind = "screenplay" | "storyboard" | "project";
 
 const FORMATS: { value: Format; label: string; icon: typeof FileText }[] = [
   { value: "md", label: "Markdown (.md)", icon: FileCode2 },
@@ -20,12 +21,19 @@ const FORMATS: { value: Format; label: string; icon: typeof FileText }[] = [
 export function ExportPanel({ projectId, projectTitle, episodes }: Props) {
   const [busy, setBusy] = React.useState<Format | null>(null);
   const [episode, setEpisode] = React.useState<"all" | number>("all");
+  const [kind, setKind] = React.useState<ExportKind>("screenplay");
+  const [from, setFrom] = React.useState<number>(episodes[0] ?? 1);
+  const [to, setTo] = React.useState<number>(episodes[episodes.length - 1] ?? 1);
 
   async function download(format: Format) {
     setBusy(format);
     try {
-      const params = new URLSearchParams({ format });
+      const params = new URLSearchParams({ format, kind });
       if (episode !== "all") params.set("episode", String(episode));
+      else if (kind !== "project") {
+        params.set("from", String(Math.min(from, to)));
+        params.set("to", String(Math.max(from, to)));
+      }
       const url = `/api/projects/${projectId}/export?${params.toString()}`;
       const res = await fetch(url);
       if (!res.ok) {
@@ -83,6 +91,57 @@ export function ExportPanel({ projectId, projectTitle, episodes }: Props) {
             </option>
           ))}
         </select>
+        {episode === "all" && kind !== "project" && (
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <label className="space-y-1">
+              <span className="block text-[color:var(--color-foreground)]/60">起始集</span>
+              <input
+                type="number"
+                min={episodes[0] ?? 1}
+                max={episodes[episodes.length - 1] ?? 1}
+                value={from}
+                onChange={(e) => setFrom(Number(e.target.value) || 1)}
+                className="w-full rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-background-2)] px-2 py-1.5 outline-none focus:border-[color:var(--color-primary)]"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-[color:var(--color-foreground)]/60">结束集</span>
+              <input
+                type="number"
+                min={episodes[0] ?? 1}
+                max={episodes[episodes.length - 1] ?? 1}
+                value={to}
+                onChange={(e) => setTo(Number(e.target.value) || 1)}
+                className="w-full rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-background-2)] px-2 py-1.5 outline-none focus:border-[color:var(--color-primary)]"
+              />
+            </label>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs text-[color:var(--color-foreground)]/70">交付内容</label>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {[
+            { value: "screenplay", label: "完整剧本" },
+            { value: "storyboard", label: "分镜脚本" },
+            { value: "project", label: "项目资料" },
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setKind(item.value as ExportKind)}
+              className={
+                "rounded-md border px-3 py-2 text-sm transition " +
+                (kind === item.value
+                  ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/15 text-[color:var(--color-primary)]"
+                  : "border-[color:var(--color-border)] bg-[color:var(--color-background-2)] text-[color:var(--color-foreground)] hover:border-[color:var(--color-primary)]/60")
+              }
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">

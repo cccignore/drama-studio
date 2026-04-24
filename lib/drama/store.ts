@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { getDb } from "../db/sqlite";
 import { defaultDramaState, type DramaState, type Project, type ProjectRow } from "./types";
+import { stepIndex } from "./state-machine";
 import { ROUTING_PRESETS } from "../llm/presets";
 import { getDefaultLLMConfig, upsertProjectLLMBinding } from "../llm/store";
 import type { ProjectLLMCommand } from "../llm/types";
@@ -60,13 +61,28 @@ export function updateProject(
 ): Project | null {
   const existing = getProject(id);
   if (!existing) return null;
-  const nextState = patch.state ? { ...existing.state, ...patch.state } : existing.state;
+  const nextState = patch.state ? mergeStateWithoutRollback(existing.state, patch.state) : existing.state;
   const nextTitle = patch.title?.trim() || existing.title;
   const now = Date.now();
   getDb()
     .prepare(`UPDATE projects SET title = ?, state_json = ?, updated_at = ? WHERE id = ?`)
     .run(nextTitle, JSON.stringify(nextState), now, id);
   return getProject(id);
+}
+
+export function mergeStateWithoutRollback(
+  current: DramaState,
+  patch: Partial<DramaState>
+): DramaState {
+  const next = { ...current, ...patch };
+  if (patch.currentStep) {
+    const currentIdx = stepIndex(current.currentStep);
+    const requestedIdx = stepIndex(patch.currentStep);
+    if (requestedIdx < currentIdx || requestedIdx < 0) {
+      next.currentStep = current.currentStep;
+    }
+  }
+  return next;
 }
 
 export function deleteProject(id: string): boolean {

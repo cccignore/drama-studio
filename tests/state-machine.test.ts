@@ -5,6 +5,7 @@ import {
   deriveMaxAccessibleStep,
   promoteStep,
 } from "../lib/drama/state-machine";
+import { mergeStateWithoutRollback } from "../lib/drama/store";
 import { defaultDramaState } from "../lib/drama/types";
 
 describe("state-machine", () => {
@@ -43,5 +44,11 @@ describe("state-machine", () => {
     expect(canRunCommand("storyboard", midWrite, { writtenEpisodes: 1 })).toEqual({ ok: true });
     // before any episode is written, storyboard should still be blocked unless currentStep reaches storyboard
     expect(canRunCommand("storyboard", midWrite, { writtenEpisodes: 0 })).toMatchObject({ ok: false });
+  });
+
+  it("prevents project state patches from rolling back currentStep", () => {
+    const state = { ...defaultDramaState(), currentStep: "episode" as const };
+    expect(mergeStateWithoutRollback(state, { currentStep: "start" }).currentStep).toBe("episode");
+    expect(mergeStateWithoutRollback(state, { currentStep: "review" }).currentStep).toBe("review");
   });
 });

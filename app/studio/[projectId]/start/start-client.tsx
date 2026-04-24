@@ -37,6 +37,7 @@ export function StartStepClient({
   const [totalEpisodes, setTotalEpisodes] = React.useState<number>(initialState.totalEpisodes || 60);
   const [mode, setMode] = React.useState<"domestic" | "overseas">(initialState.mode);
   const [freeText, setFreeText] = React.useState(initialState.freeText ?? "");
+  const [customGenre, setCustomGenre] = React.useState("");
   const [savedContent, setSavedContent] = React.useState<string | null>(initialArtifact?.content ?? null);
   const [canAdvance, setCanAdvance] = React.useState<boolean>(!!initialArtifact);
   const isMiniSeries = totalEpisodes <= 5;
@@ -93,6 +94,21 @@ export function StartStepClient({
       mode,
       freeText: freeText || undefined,
     });
+  };
+
+  const addCustomGenre = () => {
+    const value = customGenre.trim();
+    if (!value) return;
+    if (genre.includes(value)) {
+      toast.error("这个题材已经添加过了");
+      return;
+    }
+    if (genre.length >= 3) {
+      toast.error("题材最多选择 3 个");
+      return;
+    }
+    setGenre([...genre, value]);
+    setCustomGenre("");
   };
 
   const applyMiniDemoPreset = () => {
@@ -206,6 +222,22 @@ export function StartStepClient({
             题材（最多 3 个，顺序=主副）
           </label>
           <GenrePicker value={genre} onChange={setGenre} max={3} />
+          <div className="mt-3 flex gap-2">
+            <Input
+              value={customGenre}
+              onChange={(e) => setCustomGenre(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustomGenre();
+                }
+              }}
+              placeholder="没有合适题材？输入自定义题材，例如：怪谈伐木 / AI悬疑"
+            />
+            <Button type="button" variant="secondary" onClick={addCustomGenre} disabled={genre.length >= 3}>
+              添加
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">

@@ -6,6 +6,7 @@ import { StepProgress } from "@/components/wizard/step-progress";
 import { ProjectControlsPanel } from "@/components/drama/project-controls-panel";
 import { ArtifactIOBar } from "@/components/drama/artifact-io-bar";
 import { getProject } from "@/lib/drama/store";
+import { repairProjectProgress } from "@/lib/drama/progress";
 import { deriveMaxAccessibleStep, STEP_LABEL } from "@/lib/drama/state-machine";
 import { getEpisodeIndices, getReviewIndices } from "@/lib/drama/artifacts";
 
@@ -19,8 +20,9 @@ export default async function StudioLayout({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const project = getProject(projectId);
-  if (!project) notFound();
+  const found = getProject(projectId);
+  if (!found) notFound();
+  const project = repairProjectProgress(found);
   const writtenEpisodes = getEpisodeIndices(project.id).length;
   const reviewedEpisodes = getReviewIndices(project.id).length;
   const maxAccessibleStep = deriveMaxAccessibleStep(project.state, {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { readJsonBody } from "@/lib/api/read-json-body";
 import { AppError, ok, toJsonError } from "@/lib/api/errors";
 import { deleteProject, getProject, updateProject } from "@/lib/drama/store";
+import { repairProjectProgress } from "@/lib/drama/progress";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
     const project = getProject(id);
     if (!project) throw new AppError("not_found", "项目不存在", 404);
-    return ok({ item: project });
+    return ok({ item: repairProjectProgress(project) });
   } catch (err) {
     return toJsonError(err);
   }
@@ -32,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     const updated = updateProject(id, parsed.data as any);
     if (!updated) throw new AppError("not_found", "项目不存在", 404);
-    return ok({ item: updated });
+    return ok({ item: repairProjectProgress(updated) });
   } catch (err) {
     return toJsonError(err);
   }
