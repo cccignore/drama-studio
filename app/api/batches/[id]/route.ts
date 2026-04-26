@@ -17,6 +17,7 @@ const PatchSchema = z.object({
   targetMarket: z.enum(["domestic", "overseas"]).optional(),
   totalEpisodes: z.number().int().min(1).max(120).optional(),
   status: z.string().optional(),
+  useComplexReversal: z.boolean().optional(),
 });
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -25,6 +25,7 @@ export interface DramaState {
   freeText?: string;
   multiAgentEnabled?: boolean;
   multiAgentCommands?: ("plan" | "episode")[];
+  complexReversalEnabled?: boolean;
 }
 
 export function defaultDramaState(): DramaState {
@@ -39,6 +40,7 @@ export function defaultDramaState(): DramaState {
     dramaTitle: "",
     multiAgentEnabled: false,
     multiAgentCommands: ["episode"],
+    complexReversalEnabled: false,
   };
 }
 

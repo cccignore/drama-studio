@@ -11,6 +11,7 @@ const CreateSchema = z.object({
   sourceText: z.string().min(1, "请粘贴红果热榜/剧名/关键词"),
   targetMarket: z.enum(["domestic", "overseas"]).default("overseas"),
   totalEpisodes: z.number().int().min(1).max(120).optional(),
+  useComplexReversal: z.boolean().optional().default(false),
 });
 
 export async function GET() {

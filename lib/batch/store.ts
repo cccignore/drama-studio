@@ -10,6 +10,7 @@ interface BatchProjectRow {
   target_market: string;
   total_episodes: number;
   status: string;
+  use_complex_reversal: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -44,6 +45,7 @@ function rowToProject(row: BatchProjectRow): BatchProject {
     targetMarket: row.target_market === "domestic" ? "domestic" : "overseas",
     totalEpisodes: row.total_episodes,
     status: row.status,
+    useComplexReversal: row.use_complex_reversal === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -101,6 +103,7 @@ export function createBatchProject(input: {
   sourceText: string;
   targetMarket: BatchMarket;
   totalEpisodes?: number;
+  useComplexReversal?: boolean;
 }): BatchProject {
   const now = Date.now();
   const id = `bat_${nanoid(10)}`;
@@ -108,8 +111,8 @@ export function createBatchProject(input: {
   db
     .prepare(
       `INSERT INTO batch_projects
-       (id, title, source_text, target_market, total_episodes, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, title, source_text, target_market, total_episodes, status, use_complex_reversal, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -118,6 +121,7 @@ export function createBatchProject(input: {
       input.targetMarket,
       input.totalEpisodes ?? 30,
       "draft",
+      input.useComplexReversal ? 1 : 0,
       now,
       now
     );
@@ -128,7 +132,9 @@ export function createBatchProject(input: {
 
 export function updateBatchProject(
   id: string,
-  patch: Partial<Pick<BatchProject, "title" | "sourceText" | "targetMarket" | "totalEpisodes" | "status">>
+  patch: Partial<
+    Pick<BatchProject, "title" | "sourceText" | "targetMarket" | "totalEpisodes" | "status" | "useComplexReversal">
+  >
 ): BatchProject | null {
   const existing = getBatchProject(id);
   if (!existing) return null;
@@ -137,10 +143,19 @@ export function updateBatchProject(
   getDb()
     .prepare(
       `UPDATE batch_projects
-       SET title = ?, source_text = ?, target_market = ?, total_episodes = ?, status = ?, updated_at = ?
+       SET title = ?, source_text = ?, target_market = ?, total_episodes = ?, status = ?, use_complex_reversal = ?, updated_at = ?
        WHERE id = ?`
     )
-    .run(next.title, next.sourceText, next.targetMarket, next.totalEpisodes, next.status, now, id);
+    .run(
+      next.title,
+      next.sourceText,
+      next.targetMarket,
+      next.totalEpisodes,
+      next.status,
+      next.useComplexReversal ? 1 : 0,
+      now,
+      id
+    );
   return getBatchProject(id);
 }
 

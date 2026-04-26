@@ -68,14 +68,15 @@ CREATE TABLE IF NOT EXISTS step_conversations (
 CREATE INDEX IF NOT EXISTS idx_stepconv_project ON step_conversations(project_id, artifact_name, ts);
 
 CREATE TABLE IF NOT EXISTS batch_projects (
-  id             TEXT PRIMARY KEY,
-  title          TEXT NOT NULL,
-  source_text    TEXT NOT NULL,
-  target_market  TEXT NOT NULL DEFAULT 'overseas',
-  total_episodes INTEGER NOT NULL DEFAULT 30,
-  status         TEXT NOT NULL DEFAULT 'draft',
-  created_at     INTEGER NOT NULL,
-  updated_at     INTEGER NOT NULL
+  id                    TEXT PRIMARY KEY,
+  title                 TEXT NOT NULL,
+  source_text           TEXT NOT NULL,
+  target_market         TEXT NOT NULL DEFAULT 'overseas',
+  total_episodes        INTEGER NOT NULL DEFAULT 30,
+  status                TEXT NOT NULL DEFAULT 'draft',
+  use_complex_reversal  INTEGER NOT NULL DEFAULT 0,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS batch_items (

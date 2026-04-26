@@ -393,11 +393,20 @@ async function runCreative({ cfg, project, args, send, signal }: RunCtx) {
   if (!brief.trim()) {
     throw new Error("请先完成 /start 或在参数里传入一句话题材 brief");
   }
-  send({ type: "progress", stage: "compose-prompt", message: "整合立项信息并起草三幕创意 …" });
-  const refs = loadRefsForCommand("creative");
+  const complexReversal = !!project.state.complexReversalEnabled;
+  send({
+    type: "progress",
+    stage: "compose-prompt",
+    message: complexReversal
+      ? "整合立项信息并起草三幕创意（5–7 层反转密度）…"
+      : "整合立项信息并起草三幕创意 …",
+  });
+  const refs = loadRefsForCommand("creative", {
+    extraSlugs: complexReversal ? ["complex-reversal"] : undefined,
+  });
   const messages = buildCreativeMessages(
     project.state,
-    { brief, freeText: project.state.freeText },
+    { brief, freeText: project.state.freeText, complexReversal },
     refs
   );
   send({ type: "progress", stage: "calling-llm", message: `正在调用 ${cfg.name} 生成三幕创意方案 …` });

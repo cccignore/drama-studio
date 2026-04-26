@@ -18,6 +18,7 @@ export interface BatchProject {
   targetMarket: BatchMarket;
   totalEpisodes: number;
   status: string;
+  useComplexReversal: boolean;
   createdAt: number;
   updatedAt: number;
 }

@@ -8,7 +8,7 @@ import { closeDb } from "../lib/db/sqlite";
 import { createBatchProject, listBatchItems, upsertImportedItems } from "../lib/batch/store";
 import type { BatchItem, BatchProject } from "../lib/batch/types";
 
-function project(): BatchProject {
+function project(overrides: Partial<BatchProject> = {}): BatchProject {
   return {
     id: "bat_1",
     title: "红果批量测试",
@@ -16,8 +16,10 @@ function project(): BatchProject {
     targetMarket: "overseas",
     totalEpisodes: 30,
     status: "draft",
+    useComplexReversal: false,
     createdAt: 1,
     updatedAt: 1,
+    ...overrides,
   };
 }
 

@@ -30,6 +30,7 @@ interface BatchProject {
   targetMarket: Market;
   totalEpisodes: number;
   status: string;
+  useComplexReversal: boolean;
   updatedAt: number;
 }
 
@@ -94,6 +95,7 @@ export function BatchFactoryClient() {
   const [title, setTitle] = React.useState("红果批量工厂");
   const [sourceText, setSourceText] = React.useState("");
   const [targetMarket, setTargetMarket] = React.useState<Market>("overseas");
+  const [useComplexReversal, setUseComplexReversal] = React.useState(false);
   const [totalEpisodes, setTotalEpisodes] = React.useState(30);
   const [batchSize, setBatchSize] = React.useState(3);
   const [scrapeLimit, setScrapeLimit] = React.useState(12);
@@ -141,7 +143,7 @@ export function BatchFactoryClient() {
     try {
       const data = await api<{ item: BatchProject; items: BatchItem[] }>("/api/batches", {
         method: "POST",
-        body: JSON.stringify({ title, sourceText, targetMarket, totalEpisodes }),
+        body: JSON.stringify({ title, sourceText, targetMarket, totalEpisodes, useComplexReversal }),
       });
       toast.success(`已解析 ${data.items.length} 部红果源剧`);
       setActive(data.item);
@@ -288,7 +290,10 @@ export function BatchFactoryClient() {
                     {active.targetMarket === "overseas" ? "海外本土化" : "国内短剧"} · 完整剧本 {active.totalEpisodes} 集 · 源剧任务 {items.length}
                   </div>
                 </div>
-                <Badge tone="muted">{active.status}</Badge>
+                <div className="flex items-center gap-2">
+                  {active.useComplexReversal && <Badge tone="warning">复杂反转</Badge>}
+                  <Badge tone="muted">{active.status}</Badge>
+                </div>
               </div>
             </div>
           ) : (
@@ -311,6 +316,7 @@ export function BatchFactoryClient() {
           title={title}
           sourceText={sourceText}
           targetMarket={targetMarket}
+          useComplexReversal={useComplexReversal}
           totalEpisodes={totalEpisodes}
           batchSize={batchSize}
           scrapeLimit={scrapeLimit}
@@ -323,6 +329,7 @@ export function BatchFactoryClient() {
           onTitle={setTitle}
           onSourceText={setSourceText}
           onTargetMarket={setTargetMarket}
+          onUseComplexReversal={setUseComplexReversal}
           onTotalEpisodes={setTotalEpisodes}
           onBatchSize={setBatchSize}
           onScrapeLimit={setScrapeLimit}
@@ -402,6 +409,7 @@ function SourcesStep({
   title,
   sourceText,
   targetMarket,
+  useComplexReversal,
   totalEpisodes,
   batchSize,
   scrapeLimit,
@@ -414,6 +422,7 @@ function SourcesStep({
   onTitle,
   onSourceText,
   onTargetMarket,
+  onUseComplexReversal,
   onTotalEpisodes,
   onBatchSize,
   onScrapeLimit,
@@ -427,6 +436,7 @@ function SourcesStep({
   title: string;
   sourceText: string;
   targetMarket: Market;
+  useComplexReversal: boolean;
   totalEpisodes: number;
   batchSize: number;
   scrapeLimit: number;
@@ -439,6 +449,7 @@ function SourcesStep({
   onTitle: (value: string) => void;
   onSourceText: (value: string) => void;
   onTargetMarket: (value: Market) => void;
+  onUseComplexReversal: (value: boolean) => void;
   onTotalEpisodes: (value: number) => void;
   onBatchSize: (value: number) => void;
   onScrapeLimit: (value: number) => void;
@@ -516,6 +527,20 @@ function SourcesStep({
               解析为源剧任务池
             </Button>
           </div>
+          <label className="flex items-start gap-2 rounded-md border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] p-3 text-xs leading-relaxed">
+            <input
+              type="checkbox"
+              checked={useComplexReversal}
+              onChange={(e) => onUseComplexReversal(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-medium text-[color:var(--color-text)]">启用复杂反转 concept 模式</span>
+              <span className="ml-1 text-[color:var(--color-muted)]">
+                · 三幕创意阶段使用 5–7 层反转密度模板，强制写出主角 5 要素视觉化描述。适合海外平台（ReelShort/DramaBox）或想做高反转质感的批次；普通爽剧批次不建议开启。
+              </span>
+            </span>
+          </label>
         </div>
         <ReviewBox
           title="源剧池审核"

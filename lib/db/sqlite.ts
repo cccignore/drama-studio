@@ -55,14 +55,15 @@ function runMigrations(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_stepconv_project ON step_conversations(project_id, artifact_name, ts);
 
     CREATE TABLE IF NOT EXISTS batch_projects (
-      id             TEXT PRIMARY KEY,
-      title          TEXT NOT NULL,
-      source_text    TEXT NOT NULL,
-      target_market  TEXT NOT NULL DEFAULT 'overseas',
-      total_episodes INTEGER NOT NULL DEFAULT 30,
-      status         TEXT NOT NULL DEFAULT 'draft',
-      created_at     INTEGER NOT NULL,
-      updated_at     INTEGER NOT NULL
+      id                    TEXT PRIMARY KEY,
+      title                 TEXT NOT NULL,
+      source_text           TEXT NOT NULL,
+      target_market         TEXT NOT NULL DEFAULT 'overseas',
+      total_episodes        INTEGER NOT NULL DEFAULT 30,
+      status                TEXT NOT NULL DEFAULT 'draft',
+      use_complex_reversal  INTEGER NOT NULL DEFAULT 0,
+      created_at            INTEGER NOT NULL,
+      updated_at            INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS batch_items (
@@ -103,6 +104,15 @@ function runMigrations(db: Database.Database) {
   }
   if (!hasBatchColumn("source_summary")) {
     db.exec(`ALTER TABLE batch_items ADD COLUMN source_summary TEXT`);
+  }
+
+  const batchProjectColumns = db
+    .prepare(`PRAGMA table_info(batch_projects)`)
+    .all() as Array<{ name: string }>;
+  const hasBatchProjectColumn = (name: string) =>
+    batchProjectColumns.some((col) => col.name === name);
+  if (!hasBatchProjectColumn("use_complex_reversal")) {
+    db.exec(`ALTER TABLE batch_projects ADD COLUMN use_complex_reversal INTEGER NOT NULL DEFAULT 0`);
   }
 }
 

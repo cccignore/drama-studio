@@ -16,23 +16,29 @@ import { MoEPresetPanel } from "./controls/moe-panel";
 import { BindingPanel } from "./controls/binding-panel";
 import { MarketPanel } from "./controls/market-panel";
 import { MultiAgentPanel } from "./controls/multi-agent-panel";
+import { ConceptPanel } from "./controls/concept-panel";
 
 export function ProjectControlsPanel({
   projectId,
   initialMode,
   initialMultiAgentEnabled,
   initialMultiAgentCommands,
+  initialComplexReversalEnabled,
 }: {
   projectId: string;
   initialMode: "domestic" | "overseas";
   initialMultiAgentEnabled?: boolean;
   initialMultiAgentCommands?: ("plan" | "episode")[];
+  initialComplexReversalEnabled?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [mode, setMode] = React.useState(initialMode);
   const [multiAgentEnabled, setMultiAgentEnabled] = React.useState(!!initialMultiAgentEnabled);
   const [multiAgentCommands, setMultiAgentCommands] = React.useState<("plan" | "episode")[]>(
     initialMultiAgentCommands?.length ? initialMultiAgentCommands : ["episode"]
+  );
+  const [complexReversalEnabled, setComplexReversalEnabled] = React.useState(
+    !!initialComplexReversalEnabled
   );
 
   const controls = useProjectControls(projectId);
@@ -90,6 +96,11 @@ export function ProjectControlsPanel({
                 setEnabled={setMultiAgentEnabled}
                 commands={multiAgentCommands}
                 setCommands={setMultiAgentCommands}
+                patchState={controls.patchState}
+              />
+              <ConceptPanel
+                enabled={complexReversalEnabled}
+                setEnabled={setComplexReversalEnabled}
                 patchState={controls.patchState}
               />
             </section>

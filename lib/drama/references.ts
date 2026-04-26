@@ -19,6 +19,8 @@ export const REF_MAP: Record<string, string[]> = {
 export interface LoadRefsOptions {
   episodeIndex?: number;
   maxCharsPerRef?: number;
+  /** 额外按需追加的 reference slug（去重，附加在命令默认列表之后） */
+  extraSlugs?: string[];
 }
 
 const cache = new Map<string, string>();
@@ -53,12 +55,17 @@ export function loadRefsForCommand(command: string, opts?: LoadRefsOptions): str
 }
 
 function resolveRefSlugs(command: string, opts?: LoadRefsOptions): string[] {
+  let slugs: string[];
   if (command === "episode") {
     const base = [...(REF_MAP.episode ?? [])];
-    if ((opts?.episodeIndex ?? 999) <= 3) {
-      return ["opening-rules", ...base];
-    }
-    return base;
+    slugs = (opts?.episodeIndex ?? 999) <= 3 ? ["opening-rules", ...base] : base;
+  } else {
+    slugs = [...(REF_MAP[command] ?? [])];
   }
-  return REF_MAP[command] ?? [];
+  if (opts?.extraSlugs?.length) {
+    for (const slug of opts.extraSlugs) {
+      if (slug && !slugs.includes(slug)) slugs.push(slug);
+    }
+  }
+  return slugs;
 }

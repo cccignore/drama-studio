@@ -49,6 +49,7 @@ export default async function StudioLayout({
           initialMode={project.state.mode}
           initialMultiAgentEnabled={project.state.multiAgentEnabled}
           initialMultiAgentCommands={project.state.multiAgentCommands}
+          initialComplexReversalEnabled={project.state.complexReversalEnabled}
         />
       }
       nav={[
