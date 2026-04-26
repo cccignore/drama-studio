@@ -169,6 +169,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           logEvent(id, command, "done");
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
+          // 客户端断开（标签页关闭/刷新/网络切换/系统休眠）会让 request.signal 中断；
+          // 多集任务（storyboard/episode/review）已经把每集落库，剩余可以用「区间」模式补跑。
+          // 这种情况不算真正的错误，落 aborted 事件即可，避免 UI 标红 + 用户误以为是 token 用完。
+          const looksAborted =
+            signal.aborted ||
+            (err instanceof DOMException && err.name === "AbortError") ||
+            /aborted|abort/i.test(msg) ||
+            msg === "已取消";
+          if (looksAborted) {
+            send({
+              type: "progress",
+              stage: "paused",
+              message: "运行被中断（客户端连接已断开）。已生成的产物已保存，可以回到页面用「区间」模式从下一项补跑剩余。",
+            });
+            logEvent(id, command, "aborted", {
+              message: "客户端连接断开，运行未完成；已生成的产物已落库，可用「区间」模式续跑。",
+              upstream: msg,
+            });
+            return;
+          }
           send({ type: "error", message: msg, code: "run_failed" });
           logEvent(id, command, "error", { message: msg });
         }
