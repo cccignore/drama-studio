@@ -21,7 +21,8 @@ export function renderBatchMarkdown(project: BatchProject, items: BatchItem[], s
       if (item.sourceSummary) parts.push(`简介：${item.sourceSummary}`);
       if (item.oneLiner) parts.push(`新一句话题材：${item.oneLiner}`);
     } else if (stage === "creative") {
-      parts.push(item.creativeMd || item.oneLiner || "（空）");
+      const block = renderCreativeBlock(item);
+      parts.push(block || "（空）");
     } else if (stage === "screenplay") {
       parts.push(item.screenplayMd || "（未生成完整剧本）");
     } else {
@@ -30,6 +31,24 @@ export function renderBatchMarkdown(project: BatchProject, items: BatchItem[], s
     parts.push("");
   }
   return parts.join("\n");
+}
+
+function renderCreativeBlock(item: BatchItem): string {
+  const hasStructured = Boolean(item.act1 || item.protagonist || item.audience);
+  if (!hasStructured) return item.creativeMd || item.oneLiner || "";
+  const lines: string[] = [];
+  if (item.protagonist) lines.push(`**第一主角**: ${item.protagonist}`);
+  if (item.narrativePov) lines.push(`**叙事视角**: ${item.narrativePov}`);
+  if (item.audience) lines.push(`**受众**: ${item.audience}`);
+  if (item.storyType) lines.push(`**故事类型**: ${item.storyType}`);
+  if (item.setting) lines.push(`**故事背景**: ${item.setting}`);
+  if (item.act1 || item.act2 || item.act3) {
+    lines.push("", "### 故事梗概");
+    if (item.act1) lines.push("", "**Act 1**", "", item.act1);
+    if (item.act2) lines.push("", "**Act 2**", "", item.act2);
+    if (item.act3) lines.push("", "**Act 3**", "", item.act3);
+  }
+  return lines.join("\n").trim();
 }
 
 export async function buildBatchZip(project: BatchProject, items: BatchItem[]): Promise<Uint8Array> {

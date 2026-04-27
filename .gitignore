@@ -14,3 +14,8 @@ tsconfig.tsbuildinfo
 
 # 产品方提供的内部素材，不入仓库
 提示词.docx
+
+# result/ 是本地工作区（参考 docx、smoke 测试输出、临时 csv），
+# 唯一的例外是 docx → csv 的转换交付物。
+result/*
+!result/ideas-from-docx.csv

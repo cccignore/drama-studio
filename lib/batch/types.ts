@@ -32,6 +32,14 @@ export interface BatchItem {
   sourceText: string;
   title: string;
   oneLiner: string;
+  protagonist: string;
+  narrativePov: string;
+  audience: string;
+  storyType: string;
+  setting: string;
+  act1: string;
+  act2: string;
+  act3: string;
   creativeMd: string;
   screenplayMd: string;
   storyboardMd: string;

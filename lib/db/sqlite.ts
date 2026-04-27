@@ -75,6 +75,14 @@ function runMigrations(db: Database.Database) {
       source_text           TEXT,
       title                 TEXT,
       one_liner             TEXT,
+      protagonist           TEXT,
+      narrative_pov         TEXT,
+      audience              TEXT,
+      story_type            TEXT,
+      setting_text          TEXT,
+      act1                  TEXT,
+      act2                  TEXT,
+      act3                  TEXT,
       creative_md           TEXT,
       screenplay_md         TEXT,
       storyboard_md         TEXT,
@@ -104,6 +112,20 @@ function runMigrations(db: Database.Database) {
   }
   if (!hasBatchColumn("source_summary")) {
     db.exec(`ALTER TABLE batch_items ADD COLUMN source_summary TEXT`);
+  }
+  for (const col of [
+    "protagonist",
+    "narrative_pov",
+    "audience",
+    "story_type",
+    "setting_text",
+    "act1",
+    "act2",
+    "act3",
+  ]) {
+    if (!hasBatchColumn(col)) {
+      db.exec(`ALTER TABLE batch_items ADD COLUMN ${col} TEXT`);
+    }
   }
 
   const batchProjectColumns = db

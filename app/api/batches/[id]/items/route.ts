@@ -2,7 +2,12 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { AppError, ok, toJsonError } from "@/lib/api/errors";
 import { readJsonBody } from "@/lib/api/read-json-body";
-import { getBatchProject, listBatchItems, updateBatchItemsSelection } from "@/lib/batch/store";
+import {
+  deleteBatchItems,
+  getBatchProject,
+  listBatchItems,
+  updateBatchItemsSelection,
+} from "@/lib/batch/store";
 
 export const runtime = "nodejs";
 
@@ -15,6 +20,10 @@ const PatchSchema = z.object({
       screenplaySelected: z.boolean().optional(),
     })
   ),
+});
+
+const DeleteSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1),
 });
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +45,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       throw new AppError("invalid_input", parsed.error.issues[0]?.message ?? "参数错误", 400);
     }
     return ok({ items: updateBatchItemsSelection(id, parsed.data.items) });
+  } catch (err) {
+    return toJsonError(err);
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    if (!getBatchProject(id)) throw new AppError("not_found", "批量任务不存在", 404);
+    const parsed = DeleteSchema.safeParse(await readJsonBody(request));
+    if (!parsed.success) {
+      throw new AppError("invalid_input", parsed.error.issues[0]?.message ?? "参数错误", 400);
+    }
+    const removed = deleteBatchItems(id, parsed.data.ids);
+    return ok({ removed, items: listBatchItems(id) });
   } catch (err) {
     return toJsonError(err);
   }

@@ -9,6 +9,7 @@ import {
   Loader2,
   Play,
   RefreshCcw,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,6 @@ import { Input, Textarea } from "@/components/ui/input";
 type Market = "domestic" | "overseas";
 type Stage = "creative" | "screenplay" | "storyboard";
 type WorkflowStep = "sources" | Stage;
-type ReviewStep = "sources" | "creative" | "screenplay";
 type ExportStage = WorkflowStep;
 type ScrapeSource = "latest" | "rank";
 type BusyState = Stage | "create" | "import" | "scrape";
@@ -42,6 +42,14 @@ interface BatchItem {
   sourceText: string;
   title: string;
   oneLiner: string;
+  protagonist: string;
+  narrativePov: string;
+  audience: string;
+  storyType: string;
+  setting: string;
+  act1: string;
+  act2: string;
+  act3: string;
   creativeMd: string;
   screenplayMd: string;
   storyboardMd: string;
@@ -66,10 +74,10 @@ interface RunInfo {
 }
 
 const STEPS: Array<{ key: WorkflowStep; title: string; note: string }> = [
-  { key: "sources", title: "1. 源剧池", note: "抓取/粘贴红果源剧，审核后保留要继续生成的源剧。" },
-  { key: "creative", title: "2. 三幕创意", note: "为入选源剧生成新剧名、一句话题材和三幕创意。" },
-  { key: "screenplay", title: "3. 完整剧本", note: "审核创意后，只为保留项生成完整剧本。" },
-  { key: "storyboard", title: "4. 分镜脚本", note: "审核剧本后，只为保留项生成最终分镜脚本。" },
+  { key: "sources", title: "1. 源剧池", note: "抓取/粘贴红果源剧，删除不要的行后进入下一步。" },
+  { key: "creative", title: "2. 三幕创意", note: "结构化输出：剧名/第一主角/视角/受众/类型/背景/Act1-3。" },
+  { key: "screenplay", title: "3. 完整剧本", note: "按 docx 格式输出第N集 + N-M 子场次（场景/人物/画面/台词/钩子）。" },
+  { key: "storyboard", title: "4. 分镜脚本", note: "逐场拆镜：镜号、景别、机位、画面、台词/SFX。" },
 ];
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -97,7 +105,7 @@ export function BatchFactoryClient() {
   const [targetMarket, setTargetMarket] = React.useState<Market>("overseas");
   const [useComplexReversal, setUseComplexReversal] = React.useState(false);
   const [totalEpisodes, setTotalEpisodes] = React.useState(30);
-  const [batchSize, setBatchSize] = React.useState(3);
+  const [batchSize, setBatchSize] = React.useState(16);
   const [scrapeLimit, setScrapeLimit] = React.useState(12);
   const [scrapeSource, setScrapeSource] = React.useState<ScrapeSource>("latest");
   const [scraped, setScraped] = React.useState<ScrapedDrama[]>([]);
@@ -196,41 +204,40 @@ export function BatchFactoryClient() {
     }
   }
 
-  async function toggle(item: BatchItem, key: "ideaSelected" | "creativeSelected" | "screenplaySelected") {
-    if (!active) return;
-    const next = { ...item, [key]: !item[key] };
-    setItems((prev) => prev.map((row) => (row.id === item.id ? next : row)));
-    try {
-      await api(`/api/batches/${active.id}/items`, {
-        method: "PATCH",
-        body: JSON.stringify({ items: [{ id: item.id, [key]: next[key] }] }),
-      });
-    } catch (err) {
-      toast.error((err as Error).message);
-      await refreshActive(active.id);
-    }
-  }
-
-  async function importCsv(reviewStep: ReviewStep) {
+  async function importCsv() {
     if (!active) return;
     setBusy("import");
     try {
-      await api(`/api/batches/${active.id}/import`, {
+      const data = await api<{ imported: number }>(`/api/batches/${active.id}/import`, {
         method: "POST",
         body: JSON.stringify({
           format: "csv",
           content: importText,
-          reviewStage: reviewStep,
-          replaceSelection: true,
+          mode: "replace",
         }),
       });
       setImportText("");
-      toast.success("审核 CSV 已导入，未保留的行已从下一阶段排除");
+      toast.success(`导入完成：${data.imported} 行；CSV 未出现的行已从批次中删除`);
       await refreshActive(active.id);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function deleteItem(item: BatchItem) {
+    if (!active) return;
+    if (!window.confirm(`删除《${item.title || item.sourceTitle || item.id}》？此操作不可恢复。`)) return;
+    try {
+      await api(`/api/batches/${active.id}/items`, {
+        method: "DELETE",
+        body: JSON.stringify({ ids: [item.id] }),
+      });
+      toast.success("已删除");
+      await refreshActive(active.id);
+    } catch (err) {
+      toast.error((err as Error).message);
     }
   }
 
@@ -337,8 +344,8 @@ export function BatchFactoryClient() {
           onScrape={scrapeSources}
           onCreate={createBatch}
           onImportText={setImportText}
-          onImport={() => importCsv("sources")}
-          onToggle={(item) => toggle(item, "ideaSelected")}
+          onImport={importCsv}
+          onDelete={deleteItem}
         />
       )}
 
@@ -346,7 +353,7 @@ export function BatchFactoryClient() {
         <GenerationStep
           step="creative"
           title="生成三幕创意"
-          description="本步骤只处理源剧池审核后保留的行。生成后导出 CSV/Markdown，人工删除不想要的创意，再导入本步骤审核 CSV。"
+          description="导出 CSV → 在 Excel 删掉不想要的行 → 导回，CSV 即真相，未出现的行从批次删除。"
           active={active}
           items={visibleItems}
           busy={busy}
@@ -356,8 +363,8 @@ export function BatchFactoryClient() {
           onBatchSize={setBatchSize}
           onRun={() => run("creative")}
           onImportText={setImportText}
-          onImport={() => importCsv("creative")}
-          onToggle={(item) => toggle(item, "creativeSelected")}
+          onImport={importCsv}
+          onDelete={deleteItem}
           onRefresh={() => refreshActive(active.id)}
         />
       )}
@@ -366,7 +373,7 @@ export function BatchFactoryClient() {
         <GenerationStep
           step="screenplay"
           title="生成完整剧本"
-          description="本步骤只处理三幕创意审核后保留的行。海外本土化只影响人名、设定和风格；剧本文本仍用中文，便于审核。"
+          description="按 docx 格式输出（第N集 / N-M 子场次 / 场景·人物·画面·台词 / 钩子）。导出 CSV → 删行 → 导回。"
           active={active}
           items={visibleItems}
           busy={busy}
@@ -376,8 +383,8 @@ export function BatchFactoryClient() {
           onBatchSize={setBatchSize}
           onRun={() => run("screenplay")}
           onImportText={setImportText}
-          onImport={() => importCsv("screenplay")}
-          onToggle={(item) => toggle(item, "screenplaySelected")}
+          onImport={importCsv}
+          onDelete={deleteItem}
           onRefresh={() => refreshActive(active.id)}
         />
       )}
@@ -386,7 +393,7 @@ export function BatchFactoryClient() {
         <GenerationStep
           step="storyboard"
           title="生成分镜脚本"
-          description="本步骤只处理完整剧本审核后保留的行。海外本土化时，只有分镜中的台词/SFX 用英文，其他字段继续中文。"
+          description="逐场拆镜。海外本土化时，只有分镜中的台词/SFX 用英文，其余字段中文。"
           active={active}
           items={visibleItems}
           busy={busy}
@@ -397,7 +404,7 @@ export function BatchFactoryClient() {
           onRun={() => run("storyboard")}
           onImportText={setImportText}
           onImport={null}
-          onToggle={null}
+          onDelete={deleteItem}
           onRefresh={() => refreshActive(active.id)}
         />
       )}
@@ -431,7 +438,7 @@ function SourcesStep({
   onCreate,
   onImportText,
   onImport,
-  onToggle,
+  onDelete,
 }: {
   title: string;
   sourceText: string;
@@ -458,7 +465,7 @@ function SourcesStep({
   onCreate: () => void;
   onImportText: (value: string) => void;
   onImport: () => void;
-  onToggle: (item: BatchItem) => void;
+  onDelete: (item: BatchItem) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -519,8 +526,8 @@ function SourcesStep({
               <Input type="number" min={1} max={120} value={totalEpisodes} onChange={(e) => onTotalEpisodes(Number(e.target.value) || 30)} />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-[color:var(--color-muted)]">生成并发数</span>
-              <Input type="number" min={1} max={20} value={batchSize} onChange={(e) => onBatchSize(Number(e.target.value) || 3)} />
+              <span className="text-xs text-[color:var(--color-muted)]">生成并发数（最大 100）</span>
+              <Input type="number" min={1} max={100} value={batchSize} onChange={(e) => onBatchSize(Number(e.target.value) || 16)} />
             </label>
             <Button className="self-end" onClick={onCreate} disabled={busy === "create" || !sourceText.trim()}>
               {busy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -556,10 +563,8 @@ function SourcesStep({
       <ItemsTable
         title="源剧任务"
         items={items}
-        columns={["source", "status", "review"]}
-        reviewLabel="源剧入选"
-        onToggle={onToggle}
-        selectedKey="ideaSelected"
+        columns={["source", "status", "actions"]}
+        onDelete={onDelete}
       />
     </div>
   );
@@ -579,7 +584,7 @@ function GenerationStep({
   onRun,
   onImportText,
   onImport,
-  onToggle,
+  onDelete,
   onRefresh,
 }: {
   step: Stage;
@@ -595,11 +600,10 @@ function GenerationStep({
   onRun: () => void;
   onImportText: (value: string) => void;
   onImport: (() => void) | null;
-  onToggle: ((item: BatchItem) => void) | null;
+  onDelete: ((item: BatchItem) => void) | null;
   onRefresh: () => void;
 }) {
   const targetCount = selectTargetIds(items, step).length;
-  const reviewStage = step === "storyboard" ? null : step;
   return (
     <div className="space-y-5">
       <section className="panel grid gap-4 p-5 xl:grid-cols-[0.9fr_1.1fr]">
@@ -610,8 +614,8 @@ function GenerationStep({
           </div>
           <div className="grid gap-3 md:grid-cols-[160px_1fr]">
             <label className="space-y-1">
-              <span className="text-xs text-[color:var(--color-muted)]">生成并发数</span>
-              <Input type="number" min={1} max={20} value={batchSize} onChange={(e) => onBatchSize(Number(e.target.value) || 3)} />
+              <span className="text-xs text-[color:var(--color-muted)]">生成并发数（最大 100）</span>
+              <Input type="number" min={1} max={100} value={batchSize} onChange={(e) => onBatchSize(Number(e.target.value) || 16)} />
             </label>
             <Button className="self-end" onClick={onRun} disabled={Boolean(busy) || targetCount === 0}>
               {busy === step ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -623,27 +627,31 @@ function GenerationStep({
           )}
         </div>
         <ReviewBox
-          title={step === "storyboard" ? "最终导出" : "本步骤审核"}
+          title={step === "storyboard" ? "最终导出" : "导出 / 导入"}
           text={
             step === "storyboard"
-              ? "分镜生成后可导出 Markdown 或 Zip 交付。海外本土化分镜只有台词/SFX 是英文，其余字段中文。"
-              : "生成后导出 CSV/Markdown。人工审核 CSV 时删除不想进入下一步的行，再粘贴回这里导入。"
+              ? "分镜生成后可导出 Markdown 或 Zip 交付。海外本土化分镜只有台词/SFX 是英文。"
+              : "导出 CSV → 在 Excel 删行 / 改字段 → 粘贴回这里导回。CSV 即真相：未出现的行从批次删除。"
           }
           active={active}
           stage={step}
           importText={importText}
           busy={busy}
           onImportText={onImportText}
-          onImport={reviewStage ? onImport : null}
+          onImport={onImport}
         />
       </section>
       <ItemsTable
         title={stageTableTitle(step)}
         items={items}
-        columns={step === "creative" ? ["source", "creative", "status", "review"] : step === "screenplay" ? ["creative", "screenplay", "status", "review"] : ["screenplay", "storyboard", "status"]}
-        reviewLabel={step === "creative" ? "创意入选" : step === "screenplay" ? "剧本入选" : ""}
-        onToggle={onToggle ?? undefined}
-        selectedKey={step === "creative" ? "creativeSelected" : step === "screenplay" ? "screenplaySelected" : undefined}
+        columns={
+          step === "creative"
+            ? ["source", "creative", "status", "actions"]
+            : step === "screenplay"
+              ? ["creative", "screenplay", "status", "actions"]
+              : ["screenplay", "storyboard", "status", "actions"]
+        }
+        onDelete={onDelete ?? undefined}
       />
     </div>
   );
@@ -745,16 +753,12 @@ function ItemsTable({
   title,
   items,
   columns,
-  reviewLabel,
-  onToggle,
-  selectedKey,
+  onDelete,
 }: {
   title: string;
   items: BatchItem[];
-  columns: Array<"source" | "creative" | "screenplay" | "storyboard" | "status" | "review">;
-  reviewLabel?: string;
-  onToggle?: (item: BatchItem) => void;
-  selectedKey?: "ideaSelected" | "creativeSelected" | "screenplaySelected";
+  columns: Array<"source" | "creative" | "screenplay" | "storyboard" | "status" | "actions">;
+  onDelete?: (item: BatchItem) => void;
 }) {
   return (
     <section className="panel overflow-hidden">
@@ -771,7 +775,7 @@ function ItemsTable({
               {columns.includes("screenplay") && <th className="px-3 py-2">完整剧本</th>}
               {columns.includes("storyboard") && <th className="px-3 py-2">分镜脚本</th>}
               {columns.includes("status") && <th className="px-3 py-2">状态</th>}
-              {columns.includes("review") && <th className="px-3 py-2">审核</th>}
+              {columns.includes("actions") && <th className="px-3 py-2 w-[80px]">操作</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-[color:var(--color-border)]">
@@ -794,7 +798,14 @@ function ItemsTable({
                   {columns.includes("creative") && (
                     <td className="max-w-[420px] px-3 py-2">
                       <div className="font-medium">{item.title || "未生成新剧名"}</div>
-                      <div className="mt-1 text-[color:var(--color-muted)]">{item.oneLiner || preview(item.creativeMd)}</div>
+                      {item.audience || item.storyType ? (
+                        <div className="mt-1 text-[11px] text-[color:var(--color-muted)]">
+                          {[item.audience, item.storyType].filter(Boolean).join(" · ")}
+                        </div>
+                      ) : null}
+                      <div className="mt-1 line-clamp-3 text-[color:var(--color-muted)]">
+                        {item.act1 || item.oneLiner || preview(item.creativeMd)}
+                      </div>
                     </td>
                   )}
                   {columns.includes("screenplay") && (
@@ -809,9 +820,19 @@ function ItemsTable({
                       {item.error && <div className="mt-2 max-w-[260px] text-[color:var(--color-danger)]">{item.error}</div>}
                     </td>
                   )}
-                  {columns.includes("review") && selectedKey && onToggle && (
+                  {columns.includes("actions") && (
                     <td className="px-3 py-2">
-                      <CheckButton active={item[selectedKey]} label={reviewLabel || "入选"} onClick={() => onToggle(item)} />
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => onDelete(item)}
+                          title="删除该项"
+                          className="inline-flex items-center gap-1 rounded border border-[color:var(--color-border)] px-2 py-1 text-[11px] text-[color:var(--color-muted)] hover:border-[color:var(--color-danger)]/50 hover:text-[color:var(--color-danger)]"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          删除
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -834,31 +855,15 @@ function DownloadLink({ id, stage, format, label }: { id: string; stage: ExportS
   );
 }
 
-function CheckButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded border px-2 py-1 text-left text-[11px] ${
-        active
-          ? "border-[color:var(--color-success)]/40 text-[color:var(--color-success)]"
-          : "border-[color:var(--color-border)] text-[color:var(--color-muted)]"
-      }`}
-    >
-      {active ? "✓" : "○"} {label}
-    </button>
-  );
-}
-
 function StepCount({ step, counts }: { step: WorkflowStep; counts: ReturnType<typeof getCounts> }) {
   const value =
     step === "sources"
-      ? `${counts.sourceSelected}/${counts.total}`
+      ? `${counts.total}`
       : step === "creative"
-        ? `${counts.creativeReady}/${counts.sourceSelected}`
+        ? `${counts.creativeReady}/${counts.total}`
         : step === "screenplay"
-          ? `${counts.screenplayReady}/${counts.creativeSelected}`
-          : `${counts.storyboardReady}/${counts.screenplaySelected}`;
+          ? `${counts.screenplayReady}/${counts.creativeReady}`
+          : `${counts.storyboardReady}/${counts.screenplayReady}`;
   return <Badge tone="muted">{value}</Badge>;
 }
 
@@ -914,20 +919,15 @@ function StatusBadge({ status }: { status: string }) {
 function getCounts(items: BatchItem[]) {
   return {
     total: items.length,
-    sourceSelected: items.filter((item) => item.ideaSelected).length,
-    creativeReady: items.filter((item) => item.creativeMd).length,
-    creativeSelected: items.filter((item) => item.creativeSelected && item.creativeMd).length,
+    creativeReady: items.filter((item) => item.creativeMd || item.act1).length,
     screenplayReady: items.filter((item) => item.screenplayMd).length,
-    screenplaySelected: items.filter((item) => item.screenplaySelected && item.screenplayMd).length,
     storyboardReady: items.filter((item) => item.storyboardMd).length,
   };
 }
 
-function filterItemsForStep(items: BatchItem[], step: WorkflowStep): BatchItem[] {
-  if (step === "sources") return items;
-  if (step === "creative") return items.filter((item) => item.ideaSelected || item.creativeMd);
-  if (step === "screenplay") return items.filter((item) => item.creativeSelected || item.screenplayMd);
-  return items.filter((item) => item.screenplaySelected || item.storyboardMd);
+function filterItemsForStep(items: BatchItem[], _step: WorkflowStep): BatchItem[] {
+  // All items are visible at every step now — CSV is truth, not selection.
+  return items;
 }
 
 function isRunStage(value: BusyState | null): value is Stage {
@@ -935,13 +935,19 @@ function isRunStage(value: BusyState | null): value is Stage {
 }
 
 function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
+  // CSV-is-truth: every row in the batch is "in". A row is targeted for a
+  // stage iff it has the prerequisite data and not yet the output for it.
   if (stage === "creative") {
-    return items.filter((item) => item.sourceText && !item.creativeMd && item.ideaSelected).map((item) => item.id);
+    return items
+      .filter((item) => item.sourceText && !item.creativeMd && !item.act1)
+      .map((item) => item.id);
   }
   if (stage === "screenplay") {
-    return items.filter((item) => item.creativeMd && !item.screenplayMd && item.creativeSelected).map((item) => item.id);
+    return items
+      .filter((item) => (item.creativeMd || item.act1) && !item.screenplayMd)
+      .map((item) => item.id);
   }
-  return items.filter((item) => item.screenplayMd && !item.storyboardMd && item.screenplaySelected).map((item) => item.id);
+  return items.filter((item) => item.screenplayMd && !item.storyboardMd).map((item) => item.id);
 }
 
 function stageStats(info: RunInfo, items: BatchItem[]) {

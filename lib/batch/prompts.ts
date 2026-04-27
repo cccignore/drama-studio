@@ -83,6 +83,12 @@ export function buildCreativeMessages(project: BatchProject, item: BatchItem): L
     ? "你是 Drama Studio 红果批量工厂里负责高反转密度短剧的商业编剧策划，长期为 ReelShort / DramaBox / Dreame 等海外平台开发**含 5–7 层反转**的短剧创意。请按主链路 /creative 的质量标准 + 复杂反转模式输出：Act1/Act2/Act3 清晰，世界观与核心主题闭环。"
     : "你是 Drama Studio 主链路里的资深短剧编剧与制片顾问。请按主链路 /creative 的质量标准执行：强投流感、强付费感、强反转，Act1/Act2/Act3 清晰，世界观、核心主题、爽点和付费钩子可执行。";
 
+  const sampleTitle = project.targetMarket === "overseas" ? "GLASS PRISON" : "玄医逆凡尘";
+  const sampleProtagonist =
+    project.targetMarket === "overseas"
+      ? "Lucas——28 岁，瘦削敏感的记忆架构师，黑框眼镜下藏着忧郁的眼神，总是穿着灰色毛衣，手指修长适合键盘操作，看起来既脆弱又坚韧"
+      : "林夏——27 岁，清冷利落的女法医，齐肩短发束成低马尾，常穿白色衬衫与黑色西裤，眼神锋利却藏着克制的善意，看起来沉稳到近乎冷漠";
+
   const baseLines = [
     `【目标市场】${marketLabel(project.targetMarket)}`,
     marketRules(project.targetMarket),
@@ -94,22 +100,40 @@ export function buildCreativeMessages(project: BatchProject, item: BatchItem): L
     item.sourceSummary ? `简介：${item.sourceSummary}` : "",
     `原始素材：${item.sourceText}`,
     "",
-    "请基于这 1 部红果源剧，生成 1 个全新的短剧方案。只能借鉴母题、冲突结构、爽点机制，不能照搬剧名、人物名、关键桥段。",
-    "格式必须为 Markdown，包含：",
-    "1. 新剧名",
-    "2. 一句话题材",
-    complex ? "3. 第一主角描述（5 要素：年龄 / 外貌 / 穿着 / 气质 / 整体印象一句话）" : "",
-    "4. Act 1 / Act 2 / Act 3（每段 ≥ 250 字，含具体场景、对白、反转揭晓时刻）",
-    "5. 世界观与人物关系",
-    "6. 核心爽点与付费卡点",
-    "7. 国内/海外本土化注意事项",
+    "请基于这 1 部红果源剧，输出 1 个全新的短剧方案。只能借鉴母题、冲突结构、爽点机制，不能照搬剧名、人物名、关键桥段。",
     "",
-    "硬性标准：",
+    "【输出格式：严格 7 段，必须使用以下中文 label，每段一行，缺一不可，禁止额外的 Markdown 标题、序号、加粗】",
+    "新剧名: <一句话剧名>",
+    "第一主角: <主角姓名——年龄、外貌、穿着、气质、整体印象一句话，五要素必须齐全且写在同一段>",
+    "叙事视角: <第几人称 + 限制/全知/多视角，括号注明跟随谁>",
+    "受众: <男性/女性/全年龄>",
+    "故事类型: <用 + 连接 3–4 个核心标签，例如 科幻+记忆+身份质疑>",
+    "故事背景: <用 + 连接 2–3 个设定要素，例如 2050年+记忆科技+监狱系统>",
+    "故事梗概: Act 1: <≥250 字，含具体场景、对白、第一次反转揭晓时刻>",
+    "Act 2: <≥250 字，含中段大反转的具体揭晓时刻>",
+    "Act 3: <≥250 字，闭环结局，反派处罚明确、核心谜团全部揭晓>",
+    "",
+    "【格式示例（仅供格式参照，内容请重新构思，禁止抄袭）】",
+    `新剧名: ${sampleTitle}`,
+    `第一主角: ${sampleProtagonist}`,
+    "叙事视角: 第三人称限制视角（跟随主角）",
+    project.targetMarket === "overseas" ? "受众: 男性" : "受众: 全年龄",
+    "故事类型: <类型1>+<类型2>+<类型3>",
+    "故事背景: <要素1>+<要素2>+<要素3>",
+    "故事梗概: Act 1: ……（具体情节）",
+    "Act 2: ……（具体情节）",
+    "Act 3: ……（具体情节）",
+    "",
+    "【硬性标准】",
+    "- 新剧名必须独立成行，不要 Markdown 标题、不要书名号、不要数字序号。",
+    project.targetMarket === "overseas"
+      ? "- 海外向：新剧名必须为全英文（推荐 4 个单词以内全大写）；主角姓名一律纯英文。"
+      : "- 国内向：新剧名建议 4-6 字中文、强冲突感。",
     "- 前 30 秒必须有开场爆点。",
     complex ? "- 三幕合计写出 5–7 层反转的具体揭晓时刻。" : "- Act 2 必须有足以推动付费的大反转。",
     "- Act 3 必须闭环，反派处罚明确，核心谜团全部揭晓。",
-    "- 输出的新剧名、一句话题材和三幕方案必须服务同一条主线，不能只是源剧简介改写。",
-  ].filter((line) => line !== "");
+    "- 7 段都必须有内容，不允许写「待补充」「TBD」或留空。",
+  ];
 
   if (complex) {
     baseLines.push("", COMPLEX_REVERSAL_BATCH_RULES);
@@ -122,11 +146,12 @@ export function buildCreativeMessages(project: BatchProject, item: BatchItem): L
 }
 
 export function buildScreenplayMessages(project: BatchProject, item: BatchItem): LLMMessage[] {
+  const creativeBlock = renderCreativeBlockForPrompt(item);
   return [
     {
       role: "system",
       content:
-        "你是 Drama Studio 主链路里的专业 Writer。请沿用 /episode 的剧本标准：场次清晰、动作可拍、台词短狠、每场必须发生局势变化，结尾必须有钩子和连续性检查点。",
+        "你是 Drama Studio 红果批量工厂里的专业短剧 Writer。请严格按 docx 交付格式输出剧本：每集若干个 N-M 子场次，每个子场次必须包含「场景 / 人物 / 画面 / 台词」四个 label，本集最后一个子场次必须额外加「钩子」。语言克制、台词短狠，每场至少发生一次局势变化（信息释放/情绪转折/权力转移/关系变化/威胁升级/决策形成/谎言暴露）。",
     },
     {
       role: "user",
@@ -136,19 +161,65 @@ export function buildScreenplayMessages(project: BatchProject, item: BatchItem):
         `【目标集数】${project.totalEpisodes}`,
         "",
         "【三幕创意】",
-        item.creativeMd || item.oneLiner || item.sourceText,
+        creativeBlock,
         "",
-        "请生成完整剧本 Markdown。要求：",
-        "- 按集输出，从第 1 集到目标集数。",
-        "- 每集包含标题、3-5 个场次、动作提示、台词和本集结尾钩子。",
-        "- 海外本土化不是整篇英文：人名使用英文名，地名/职业/关系表达做海外化，但完整剧本文本、动作提示和台词均用中文，便于审核。",
-        "- 国内版使用中文短剧表达。",
-        "- 每集最后必须包含「## 连续性检查点」，列出妆发、服装、关键道具、伤痕、站位。",
-        "- 每个场次必须至少发生一种变化：信息释放、情绪转折、权力转移、关系变化、威胁升级、决策形成或谎言暴露。",
-        "- 不要输出复盘，不要输出分镜。",
+        "【输出格式：严格按以下结构，禁止任何额外 Markdown 标题或编号】",
+        "第 1 集",
+        "",
+        "1-1",
+        "",
+        "场景：<具体地点 + 时段（日/夜/黄昏） + 内/外>",
+        "人物：<本场出场人物，逗号分隔>",
+        "画面：",
+        "△<可拍的动作或镜头描述，每行一个 △>",
+        "△<可拍的动作或镜头描述>",
+        "台词：",
+        "<角色>（情绪）：<台词>",
+        "<角色>：<台词>",
+        "",
+        "1-2",
+        "（同上结构）",
+        "",
+        "1-3",
+        "（同上结构）",
+        "",
+        "钩子：",
+        "<本集结尾钩子，1-2 句，留悬念到下一集>",
+        "",
+        "第 2 集",
+        "（同上结构，子场次编号 2-1, 2-2, 2-3 ...）",
+        "",
+        "【硬性标准】",
+        `- 必须从第 1 集写到第 ${project.totalEpisodes} 集，集数不能少。`,
+        "- 每集 3-6 个子场次，子场次编号必须为「集号-序号」（如 3-1, 3-2），不能用「第 X 场」或其他形式。",
+        "- 每个子场次必须 4 个 label 齐全：场景 / 人物 / 画面 / 台词。",
+        "- 「画面」每行以 △ 开头；「台词」每行以「<角色>（情绪）：」或「<角色>：」开头。",
+        "- 「钩子：」只在每集最后一个子场次后面出现一次，是本集收束悬念。",
+        "- 不要输出连续性检查点、复盘、分镜，也不要输出场记之外的旁白说明。",
+        project.targetMarket === "overseas"
+          ? "- 海外向：人物使用纯英文姓名，地名/职业/品牌做海外化（NYC / LA / London / Sydney / Toronto 等）；但所有 label 和台词、画面文本仍用中文便于中文审核，禁止整段英文。"
+          : "- 国内向：全部中文，使用国内短剧表达；地点用国内城市/小镇。",
       ].join("\n"),
     },
   ];
+}
+
+function renderCreativeBlockForPrompt(item: BatchItem): string {
+  const structured = [
+    item.title ? `新剧名: ${item.title}` : "",
+    item.protagonist ? `第一主角: ${item.protagonist}` : "",
+    item.narrativePov ? `叙事视角: ${item.narrativePov}` : "",
+    item.audience ? `受众: ${item.audience}` : "",
+    item.storyType ? `故事类型: ${item.storyType}` : "",
+    item.setting ? `故事背景: ${item.setting}` : "",
+    item.act1 ? `故事梗概: Act 1: ${item.act1}` : "",
+    item.act2 ? `Act 2: ${item.act2}` : "",
+    item.act3 ? `Act 3: ${item.act3}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (structured) return structured;
+  return item.creativeMd || item.oneLiner || item.sourceText || item.title || "";
 }
 
 export function buildStoryboardMessages(project: BatchProject, item: BatchItem): LLMMessage[] {

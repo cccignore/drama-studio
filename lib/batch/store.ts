@@ -24,6 +24,14 @@ interface BatchItemRow {
   source_text: string | null;
   title: string | null;
   one_liner: string | null;
+  protagonist: string | null;
+  narrative_pov: string | null;
+  audience: string | null;
+  story_type: string | null;
+  setting_text: string | null;
+  act1: string | null;
+  act2: string | null;
+  act3: string | null;
   creative_md: string | null;
   screenplay_md: string | null;
   storyboard_md: string | null;
@@ -61,6 +69,14 @@ function rowToItem(row: BatchItemRow): BatchItem {
     sourceText: row.source_text ?? "",
     title: row.title ?? "",
     oneLiner: row.one_liner ?? "",
+    protagonist: row.protagonist ?? "",
+    narrativePov: row.narrative_pov ?? "",
+    audience: row.audience ?? "",
+    storyType: row.story_type ?? "",
+    setting: row.setting_text ?? "",
+    act1: row.act1 ?? "",
+    act2: row.act2 ?? "",
+    act3: row.act3 ?? "",
     creativeMd: row.creative_md ?? "",
     screenplayMd: row.screenplay_md ?? "",
     storyboardMd: row.storyboard_md ?? "",
@@ -212,9 +228,10 @@ export function insertSourceDramas(batchId: string, sources: ParsedSourceDrama[]
 export function upsertImportedItems(
   batchId: string,
   rows: Array<Partial<BatchItem> & { id?: string }>,
-  options?: { reviewStage?: BatchReviewStage; replaceSelection?: boolean }
+  options?: { reviewStage?: BatchReviewStage; replaceSelection?: boolean; replaceAll?: boolean }
 ): BatchItem[] {
   const out: BatchItem[] = [];
+  const importedIds = new Set<string>();
   for (const row of rows) {
     const requested = row.id ? getBatchItem(row.id) : null;
     const id = requested && requested.batchId === batchId ? requested.id : `bit_${nanoid(10)}`;
@@ -226,9 +243,11 @@ export function upsertImportedItems(
       getDb()
         .prepare(
           `INSERT INTO batch_items
-           (id, batch_id, source_title, source_keywords, source_summary, source_text, title, one_liner, creative_md, screenplay_md, storyboard_md,
+           (id, batch_id, source_title, source_keywords, source_summary, source_text, title, one_liner,
+            protagonist, narrative_pov, audience, story_type, setting_text, act1, act2, act3,
+            creative_md, screenplay_md, storyboard_md,
             idea_selected, creative_selected, screenplay_selected, status, error, meta_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -239,6 +258,14 @@ export function upsertImportedItems(
           row.sourceText ?? "",
           row.title ?? "",
           row.oneLiner ?? "",
+          row.protagonist ?? "",
+          row.narrativePov ?? "",
+          row.audience ?? "",
+          row.storyType ?? "",
+          row.setting ?? "",
+          row.act1 ?? "",
+          row.act2 ?? "",
+          row.act3 ?? "",
           row.creativeMd ?? "",
           row.screenplayMd ?? "",
           row.storyboardMd ?? "",
@@ -253,12 +280,38 @@ export function upsertImportedItems(
         );
       out.push(getBatchItem(id)!);
     }
+    importedIds.add(id);
+  }
+  if (options?.replaceAll) {
+    deleteBatchItemsExcept(batchId, importedIds);
   }
   if (options?.reviewStage && options.replaceSelection) {
     replaceStageSelection(batchId, options.reviewStage, out.map((item) => item.id));
   }
   updateBatchProject(batchId, { status: "imported" });
   return out;
+}
+
+export function deleteBatchItemsExcept(batchId: string, keepIds: Set<string>): number {
+  const db = getDb();
+  if (keepIds.size === 0) {
+    const res = db.prepare(`DELETE FROM batch_items WHERE batch_id = ?`).run(batchId);
+    return res.changes;
+  }
+  const placeholders = Array.from(keepIds).map(() => "?").join(",");
+  const res = db
+    .prepare(`DELETE FROM batch_items WHERE batch_id = ? AND id NOT IN (${placeholders})`)
+    .run(batchId, ...Array.from(keepIds));
+  return res.changes;
+}
+
+export function deleteBatchItems(batchId: string, ids: string[]): number {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => "?").join(",");
+  const res = getDb()
+    .prepare(`DELETE FROM batch_items WHERE batch_id = ? AND id IN (${placeholders})`)
+    .run(batchId, ...ids);
+  return res.changes;
 }
 
 function replaceStageSelection(batchId: string, stage: BatchReviewStage, keptIds: string[]): void {
@@ -280,7 +333,7 @@ function replaceStageSelection(batchId: string, stage: BatchReviewStage, keptIds
 function inferStatus(row: Partial<BatchItem>): BatchItemStatus {
   if (row.storyboardMd) return "storyboard_ready";
   if (row.screenplayMd) return "screenplay_ready";
-  if (row.creativeMd) return "creative_ready";
+  if (row.creativeMd || row.act1 || row.act2 || row.act3) return "creative_ready";
   return "source_ready";
 }
 
@@ -292,7 +345,9 @@ export function updateBatchItem(id: string, patch: Partial<BatchItem>): BatchIte
   getDb()
     .prepare(
       `UPDATE batch_items
-       SET source_title = ?, source_keywords = ?, source_summary = ?, source_text = ?, title = ?, one_liner = ?, creative_md = ?, screenplay_md = ?, storyboard_md = ?,
+       SET source_title = ?, source_keywords = ?, source_summary = ?, source_text = ?, title = ?, one_liner = ?,
+           protagonist = ?, narrative_pov = ?, audience = ?, story_type = ?, setting_text = ?, act1 = ?, act2 = ?, act3 = ?,
+           creative_md = ?, screenplay_md = ?, storyboard_md = ?,
            idea_selected = ?, creative_selected = ?, screenplay_selected = ?, status = ?, error = ?, meta_json = ?,
            updated_at = ?
        WHERE id = ?`
@@ -304,6 +359,14 @@ export function updateBatchItem(id: string, patch: Partial<BatchItem>): BatchIte
       next.sourceText,
       next.title,
       next.oneLiner,
+      next.protagonist,
+      next.narrativePov,
+      next.audience,
+      next.storyType,
+      next.setting,
+      next.act1,
+      next.act2,
+      next.act3,
       next.creativeMd,
       next.screenplayMd,
       next.storyboardMd,

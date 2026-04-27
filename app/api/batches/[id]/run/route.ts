@@ -10,7 +10,7 @@ export const maxDuration = 300;
 
 const RunSchema = z.object({
   stage: z.enum(["creative", "screenplay", "storyboard"]),
-  batchSize: z.number().int().min(1).max(50).optional(),
+  batchSize: z.number().int().min(1).max(100).optional(),
   selectedOnly: z.boolean().optional(),
 });
 
