@@ -635,6 +635,15 @@ function GenerationStep({
   onRefresh: () => void;
 }) {
   const targetCount = selectTargetIds(items, step).length;
+  // Detect resume context: a failed row that already has partial output for
+  // the current stage. The label change tells the user "this won't restart
+  // from scratch" so they're not afraid to click again.
+  const hasResumablePartial = items.some((item) => {
+    if (item.status !== "failed") return false;
+    if (step === "screenplay") return Boolean(item.screenplayMd);
+    if (step === "storyboard") return Boolean(item.storyboardMd);
+    return false;
+  });
   return (
     <div className="space-y-5">
       <section className="panel grid gap-4 p-5 xl:grid-cols-[0.9fr_1.1fr]">
@@ -650,7 +659,7 @@ function GenerationStep({
             </label>
             <Button className="self-end" onClick={onRun} disabled={Boolean(busy) || targetCount === 0}>
               {busy === step ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              开始生成 {targetCount} 条
+              {hasResumablePartial ? `续跑 ${targetCount} 条（保留已生成集）` : `开始生成 ${targetCount} 条`}
             </Button>
           </div>
           {runInfo?.stage === step && (
@@ -683,6 +692,7 @@ function GenerationStep({
               : ["screenplay", "storyboard", "status", "actions"]
         }
         onDelete={onDelete ?? undefined}
+        totalEpisodes={active.totalEpisodes}
       />
     </div>
   );
@@ -857,11 +867,13 @@ function ItemsTable({
   items,
   columns,
   onDelete,
+  totalEpisodes,
 }: {
   title: string;
   items: BatchItem[];
   columns: Array<"source" | "creative" | "screenplay" | "storyboard" | "status" | "actions">;
   onDelete?: (item: BatchItem) => void;
+  totalEpisodes?: number;
 }) {
   return (
     <section className="panel overflow-hidden">
@@ -912,10 +924,24 @@ function ItemsTable({
                     </td>
                   )}
                   {columns.includes("screenplay") && (
-                    <td className="max-w-[420px] px-3 py-2 text-[color:var(--color-muted)]">{preview(item.screenplayMd)}</td>
+                    <td className="max-w-[420px] px-3 py-2 text-[color:var(--color-muted)]">
+                      {item.screenplayMd && totalEpisodes ? (
+                        <div className="mb-1 inline-flex items-center gap-1 rounded border border-[color:var(--color-border)] px-1.5 py-0.5 text-[10px] font-mono text-[color:var(--color-text)]">
+                          已生成 {countCompleteEpisodes(item.screenplayMd, "screenplay")}/{totalEpisodes} 集
+                        </div>
+                      ) : null}
+                      {preview(item.screenplayMd)}
+                    </td>
                   )}
                   {columns.includes("storyboard") && (
-                    <td className="max-w-[420px] px-3 py-2 text-[color:var(--color-muted)]">{preview(item.storyboardMd)}</td>
+                    <td className="max-w-[420px] px-3 py-2 text-[color:var(--color-muted)]">
+                      {item.storyboardMd && totalEpisodes ? (
+                        <div className="mb-1 inline-flex items-center gap-1 rounded border border-[color:var(--color-border)] px-1.5 py-0.5 text-[10px] font-mono text-[color:var(--color-text)]">
+                          已生成 {countCompleteEpisodes(item.storyboardMd, "storyboard")}/{totalEpisodes} 集
+                        </div>
+                      ) : null}
+                      {preview(item.storyboardMd)}
+                    </td>
                   )}
                   {columns.includes("status") && (
                     <td className="px-3 py-2">
