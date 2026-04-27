@@ -80,13 +80,18 @@ describe("batch factory", () => {
     expect(messages[1].content).toContain("Act 3:");
   });
 
-  it("keeps overseas review text in Chinese except storyboard dialogue/SFX", () => {
+  it("keeps overseas review text in Chinese except dialogue & storyboard dialogue", () => {
     const screenplayMessages = buildScreenplayMessages(project(), item());
     const storyboardMessages = buildStoryboardMessages(project(), item());
-    expect(screenplayMessages[1].content).toContain("禁止整段英文");
-    expect(screenplayMessages[1].content).toContain("台词、画面文本仍用中文");
-    expect(storyboardMessages[1].content).toContain("只有「台词/SFX」字段使用英文");
-    expect(storyboardMessages[1].content).toContain("备注全部使用中文");
+    // Screenplay dialogue is bilingual (English + Chinese), but every other
+    // label/scene/action stays in Chinese for the in-house reviewer.
+    expect(screenplayMessages[1].content).toContain("过程描写");
+    expect(screenplayMessages[1].content).toContain("先写一行英文台词");
+    expect(screenplayMessages[1].content).toContain("再写一行中文翻译");
+    // Storyboard: only the 中英双语台词 column carries English; other columns
+    // (画面描述 / 景别 / 视觉锚点 / 备注) remain Chinese.
+    expect(storyboardMessages[1].content).toContain("中英双语台词");
+    expect(storyboardMessages[1].content).toContain("只有「中英双语台词」一列出现英文");
   });
 
   it("extracts title and one-liner from numbered markdown creative output (legacy)", () => {
