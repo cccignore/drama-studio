@@ -168,7 +168,10 @@ export function buildScreenplayChunkMessages(
   const continuityBlock = previousTail
     ? [
         "",
-        "【上文已生成的剧本结尾（仅供承接，不要重复输出）】",
+        `【已写过的集（共 ${startEp - 1} 集，禁止重写、禁止再次输出）】`,
+        `已存在第 1 集 至 第 ${startEp - 1} 集 的完整剧本（含钩子）。本次输出必须直接从「第 ${startEp} 集」开始。`,
+        "",
+        `【上一集结尾（仅供你延续剧情节奏，禁止复制重写）】`,
         previousTail,
         "",
       ].join("\n")
@@ -226,6 +229,9 @@ export function buildScreenplayChunkMessages(
         marketRules(project.targetMarket),
         `【全剧总集数】${project.totalEpisodes}`,
         `【本次只输出区间】第 ${startEp} 集 至 第 ${endEp} 集（共 ${endEp - startEp + 1} 集）`,
+        startEp > 1
+          ? `【硬性铁则】你的输出必须以「第 ${startEp} 集」这一行作为第一个集数标题。**禁止**重写第 1 集到第 ${startEp - 1} 集中的任何一集，**禁止**重新介绍人物或重复上文剧情。如果你写了第 ${startEp - 1} 集或之前的内容，整批将被丢弃。`
+          : "",
         "",
         "【三幕创意】",
         creativeBlock,
@@ -314,6 +320,9 @@ export function buildStoryboardChunkMessages(
         `【目标市场】${marketLabel(project.targetMarket)}`,
         `【全剧总集数】${project.totalEpisodes}`,
         `【本次只输出区间】第 ${startEp} 集 至 第 ${endEp} 集（共 ${endEp - startEp + 1} 集）`,
+        startEp > 1
+          ? `【硬性铁则】你的输出必须以「## 第 ${startEp} 集分镜（约 X s）」作为第一个标题。**禁止**重写第 1 集到第 ${startEp - 1} 集分镜中的任何一集。如果你写了第 ${startEp - 1} 集或之前的分镜，整批将被丢弃。`
+          : "",
         "",
         "【完整剧本（仅本区间）】",
         screenplaySlice,

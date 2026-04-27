@@ -444,32 +444,42 @@ async function generateScreenplayChunked(
       partialSoFar: () => aggregate,
     });
     const cleaned = stripStraySummary(content);
-    aggregate = aggregate ? `${aggregate}\n\n${cleaned}` : cleaned;
+    // Filter the new chunk: keep only episodes whose number is >= start. The
+    // model occasionally rewrites earlier episodes (e.g. it sees the previous
+    // tail and decides to "re-establish" it); we discard those duplicates so
+    // the existing aggregate stays canonical.
+    const filtered = filterEpisodesAtOrAbove(cleaned, start);
+    if (!filtered.trim()) {
+      // Nothing usable from this attempt. Don't fail the whole stage —
+      // bump the iteration counter, leave cursor where it is, and retry.
+      console.warn(
+        `[batch-screenplay] 第 ${start}-${end} 集 LLM 输出无效（仅含 < ${start} 的集，已丢弃），iter=${iter}/${MAX_CHUNK_ITERATIONS}`
+      );
+      continue;
+    }
+    aggregate = aggregate ? `${aggregate}\n\n${filtered}` : filtered;
     // Advance the cursor based on what was actually written. If the model
     // hit max_tokens mid-batch and only completed up to e.g. episode 12 out
     // of [11..15], we resume at 13 in the next call. Critical: we trust the
     // last fully-written `第 N 集` header and roll back any half-written
     // tail so the next chunk can rewrite it cleanly.
     const lastFullEpisode = lastCompleteEpisodeNumber(aggregate);
-    if (lastFullEpisode === null) {
-      throw partialError(
-        `第 ${start}-${end} 集生成的内容里找不到完整的集数标记`,
-        aggregate
+    if (lastFullEpisode === null || lastFullEpisode < start) {
+      // We accepted some content but no episode crossed the finish line yet
+      // (could be a half-written 第 N 集 with no 钩子). Don't advance cursor;
+      // retry the same range up to MAX_CHUNK_ITERATIONS.
+      console.warn(
+        `[batch-screenplay] 第 ${start}-${end} 集 仅写到中段（lastFull=${lastFullEpisode ?? "null"}），下轮重试`
       );
-    }
-    if (lastFullEpisode < start) {
-      throw partialError(
-        `第 ${start}-${end} 集没写出任何完整集（仅识别到第 ${lastFullEpisode} 集）`,
-        aggregate
-      );
+      // Persist what we got anyway so the user can see progress.
+      updateBatchItem(item.id, { screenplayMd: aggregate });
+      continue;
     }
     if (truncated) {
       // Drop the half-written trailing episode (cursor will rewrite it).
       aggregate = trimToEpisode(aggregate, lastFullEpisode);
-      cursor = lastFullEpisode + 1;
-    } else {
-      cursor = lastFullEpisode + 1;
     }
+    cursor = lastFullEpisode + 1;
     // Checkpoint: persist current aggregate so the UI's progress badge
     // updates between chunks and a crash here doesn't lose work.
     updateBatchItem(item.id, { screenplayMd: aggregate });
@@ -529,13 +539,21 @@ async function generateStoryboardChunked(
       partialSoFar: () => aggregate,
     });
     const cleaned = stripStraySummary(content);
-    aggregate = aggregate ? `${aggregate}\n\n${cleaned}` : cleaned;
+    const filtered = filterStoryboardEpisodesAtOrAbove(cleaned, start);
+    if (!filtered.trim()) {
+      console.warn(
+        `[batch-storyboard] 第 ${start}-${end} 集 LLM 输出无效（仅含 < ${start} 的集），iter=${iter}/${MAX_CHUNK_ITERATIONS}`
+      );
+      continue;
+    }
+    aggregate = aggregate ? `${aggregate}\n\n${filtered}` : filtered;
     const lastFullEpisode = lastStoryboardEpisode(aggregate);
     if (lastFullEpisode === null || lastFullEpisode < start) {
-      throw partialError(
-        `第 ${start}-${end} 集分镜没写出任何完整集`,
-        aggregate
+      console.warn(
+        `[batch-storyboard] 第 ${start}-${end} 集 仅写到中段（lastFull=${lastFullEpisode ?? "null"}），下轮重试`
       );
+      updateBatchItem(item.id, { storyboardMd: aggregate });
+      continue;
     }
     if (truncated) {
       aggregate = trimToStoryboardEpisode(aggregate, lastFullEpisode);
@@ -580,6 +598,51 @@ export function lastCompleteEpisodeNumber(aggregate: string): number | null {
   // Tail episode: complete only if the model wrote out its 钩子 block.
   if (currentEp !== null && currentEpHasHook) lastComplete = currentEp;
   return lastComplete;
+}
+
+// Storyboard variant — keeps only `## 第 N 集分镜` blocks where N >= min.
+export function filterStoryboardEpisodesAtOrAbove(text: string, minEpisode: number): string {
+  if (!text.trim()) return "";
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  let keeping = false;
+  let seenAny = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^##\s*第\s*(\d+)\s*集分镜/);
+    if (head) {
+      const n = Number(head[1]);
+      keeping = n >= minEpisode;
+      seenAny = true;
+    } else if (!seenAny) {
+      continue;
+    }
+    if (keeping) out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
+// Drop any episode block whose header is `第 N 集` with N < minEpisode.
+// Used to defend against the model regenerating earlier episodes inside a
+// chunk meant for a higher range.
+export function filterEpisodesAtOrAbove(text: string, minEpisode: number): string {
+  if (!text.trim()) return "";
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  let keeping = false;
+  let seenAny = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^第\s*(\d+)\s*集\s*$/);
+    if (head) {
+      const n = Number(head[1]);
+      keeping = n >= minEpisode;
+      seenAny = true;
+    } else if (!seenAny) {
+      // Pre-header preamble: drop. Episode headers must come first.
+      continue;
+    }
+    if (keeping) out.push(line);
+  }
+  return out.join("\n").trim();
 }
 
 export function trimToEpisode(aggregate: string, episode: number): string {
