@@ -146,7 +146,33 @@ export function buildCreativeMessages(project: BatchProject, item: BatchItem): L
 }
 
 export function buildScreenplayMessages(project: BatchProject, item: BatchItem): LLMMessage[] {
+  return buildScreenplayChunkMessages(project, item, 1, project.totalEpisodes, "");
+}
+
+/**
+ * Build prompts for a screenplay slice covering [startEp, endEp] only.
+ * `previousTail` is the trailing portion of already-generated screenplay text
+ * (last few hundred chars) so the model can keep continuity without re-reading
+ * the entire prefix.
+ */
+export function buildScreenplayChunkMessages(
+  project: BatchProject,
+  item: BatchItem,
+  startEp: number,
+  endEp: number,
+  previousTail: string
+): LLMMessage[] {
   const creativeBlock = renderCreativeBlockForPrompt(item);
+  const isFirstChunk = startEp === 1;
+  const isLastChunk = endEp >= project.totalEpisodes;
+  const continuityBlock = previousTail
+    ? [
+        "",
+        "【上文已生成的剧本结尾（仅供承接，不要重复输出）】",
+        previousTail,
+        "",
+      ].join("\n")
+    : "";
   return [
     {
       role: "system",
@@ -158,15 +184,16 @@ export function buildScreenplayMessages(project: BatchProject, item: BatchItem):
       content: [
         `【目标市场】${marketLabel(project.targetMarket)}`,
         marketRules(project.targetMarket),
-        `【目标集数】${project.totalEpisodes}`,
+        `【全剧总集数】${project.totalEpisodes}`,
+        `【本次只输出区间】第 ${startEp} 集 至 第 ${endEp} 集（共 ${endEp - startEp + 1} 集）`,
         "",
         "【三幕创意】",
         creativeBlock,
-        "",
+        continuityBlock,
         "【输出格式：严格按以下结构，禁止任何额外 Markdown 标题或编号】",
-        "第 1 集",
+        `第 ${startEp} 集`,
         "",
-        "1-1",
+        `${startEp}-1`,
         "",
         "场景：<具体地点 + 时段（日/夜/黄昏） + 内/外>",
         "人物：<本场出场人物，逗号分隔>",
@@ -177,29 +204,33 @@ export function buildScreenplayMessages(project: BatchProject, item: BatchItem):
         "<角色>（情绪）：<台词>",
         "<角色>：<台词>",
         "",
-        "1-2",
-        "（同上结构）",
-        "",
-        "1-3",
+        `${startEp}-2`,
         "（同上结构）",
         "",
         "钩子：",
         "<本集结尾钩子，1-2 句，留悬念到下一集>",
         "",
-        "第 2 集",
-        "（同上结构，子场次编号 2-1, 2-2, 2-3 ...）",
+        `第 ${startEp + 1} 集`,
+        "（同上结构）",
         "",
-        "【硬性标准】",
-        `- 必须从第 1 集写到第 ${project.totalEpisodes} 集，集数不能少。`,
-        "- 每集 3-6 个子场次，子场次编号必须为「集号-序号」（如 3-1, 3-2），不能用「第 X 场」或其他形式。",
+        "【硬性标准（针对本批次输出）】",
+        `- 只输出第 ${startEp} 集到第 ${endEp} 集，**严禁**写第 ${startEp - 1} 集（如有）或第 ${endEp + 1} 集及之后内容。`,
+        "- 必须从第 " + startEp + " 集开始连续写到第 " + endEp + " 集，每一集都要有，不能跳号也不能停在中间。",
+        "- 每集 3-6 个子场次，子场次编号必须为「集号-序号」（如 " + startEp + "-1, " + startEp + "-2），不能用「第 X 场」或其他形式。",
         "- 每个子场次必须 4 个 label 齐全：场景 / 人物 / 画面 / 台词。",
         "- 「画面」每行以 △ 开头；「台词」每行以「<角色>（情绪）：」或「<角色>：」开头。",
         "- 「钩子：」只在每集最后一个子场次后面出现一次，是本集收束悬念。",
-        "- 不要输出连续性检查点、复盘、分镜，也不要输出场记之外的旁白说明。",
+        isFirstChunk
+          ? `- 本批次为开篇：第 ${startEp} 集前 30 秒（即 ${startEp}-1 子场次）必须出现强爆点。`
+          : "- 本批次为续写：开头紧接上文钩子，不要重新铺设定，立刻推进剧情。",
+        isLastChunk
+          ? `- 本批次为收官：第 ${endEp} 集必须把核心矛盾闭环、反派处罚明确、关键人物归位，钩子用作终章余韵而非新悬念。`
+          : `- 本批次非收官：第 ${endEp} 集的钩子必须留住悬念过渡到下一批。`,
+        "- 不要输出连续性检查点、复盘、分镜，也不要输出场记之外的旁白说明，也不要写「本批次结束」「待续」之类的总结。",
         project.targetMarket === "overseas"
           ? "- 海外向：人物使用纯英文姓名，地名/职业/品牌做海外化（NYC / LA / London / Sydney / Toronto 等）；但所有 label 和台词、画面文本仍用中文便于中文审核，禁止整段英文。"
           : "- 国内向：全部中文，使用国内短剧表达；地点用国内城市/小镇。",
-      ].join("\n"),
+      ].filter(Boolean).join("\n"),
     },
   ];
 }
@@ -223,6 +254,21 @@ function renderCreativeBlockForPrompt(item: BatchItem): string {
 }
 
 export function buildStoryboardMessages(project: BatchProject, item: BatchItem): LLMMessage[] {
+  return buildStoryboardChunkMessages(project, item, item.screenplayMd, 1, project.totalEpisodes);
+}
+
+/**
+ * Build prompts for a storyboard slice covering [startEp, endEp]. Caller must
+ * pre-extract the matching screenplay slice and pass it in `screenplaySlice`.
+ */
+export function buildStoryboardChunkMessages(
+  project: BatchProject,
+  item: BatchItem,
+  screenplaySlice: string,
+  startEp: number,
+  endEp: number
+): LLMMessage[] {
+  const _ = item;
   return [
     {
       role: "system",
@@ -233,14 +279,18 @@ export function buildStoryboardMessages(project: BatchProject, item: BatchItem):
       role: "user",
       content: [
         `【目标市场】${marketLabel(project.targetMarket)}`,
-        "【完整剧本】",
-        item.screenplayMd,
+        `【全剧总集数】${project.totalEpisodes}`,
+        `【本次只输出区间】第 ${startEp} 集 至 第 ${endEp} 集（共 ${endEp - startEp + 1} 集）`,
         "",
-        "请生成分镜脚本 Markdown。每集按镜头编号输出，字段包含：镜号、场次、景别、机位/运动、画面、台词/SFX、时长、备注。",
+        "【完整剧本（仅本区间）】",
+        screenplaySlice,
+        "",
+        `请基于上面的剧本，仅生成第 ${startEp} 集到第 ${endEp} 集 的分镜脚本 Markdown。每集按镜头编号输出，字段包含：镜号、场次、景别、机位/运动、画面、台词/SFX、时长、备注。`,
         project.targetMarket === "overseas"
           ? "海外本土化语言规则：只有「台词/SFX」字段使用英文；镜号、场次、景别、机位/运动、画面、时长、备注全部使用中文。人名继续使用英文名。"
           : "国内短剧语言规则：全部使用中文。",
         "每集镜号从 001 起连号；每场至少 4 个镜头；不要合并多个镜头到一行。",
+        `严禁输出第 ${startEp} 集之前或第 ${endEp} 集之后的内容；不要写总结或「本批次结束」之类的话。`,
       ].join("\n"),
     },
   ];

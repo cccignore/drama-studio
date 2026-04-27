@@ -4,8 +4,8 @@ import { streamLLM } from "../llm/stream";
 import type { LLMConfig, LLMMessage } from "../llm/types";
 import {
   buildCreativeMessages,
-  buildScreenplayMessages,
-  buildStoryboardMessages,
+  buildScreenplayChunkMessages,
+  buildStoryboardChunkMessages,
 } from "./prompts";
 import {
   getBatchProject,
@@ -13,7 +13,7 @@ import {
   updateBatchItem,
   updateBatchProject,
 } from "./store";
-import type { BatchItem, BatchStage } from "./types";
+import type { BatchItem, BatchProject, BatchStage } from "./types";
 
 export interface RunBatchResult {
   stage: BatchStage;
@@ -21,6 +21,16 @@ export interface RunBatchResult {
   updated: number;
   failed: number;
 }
+
+// Episodes per LLM call. Keep small so a single call stays well below the
+// provider output cap (8k tokens ≈ ~12 short-drama episodes — we cap at 5 for
+// margin, since reasoning tokens, system tokens, and Markdown overhead eat
+// into the same budget).
+const EPISODES_PER_CHUNK = 5;
+// How many trailing characters of already-generated screenplay to feed into
+// the next chunk's prompt for continuity. ~600 chars ≈ a couple of子场次,
+// enough to pick up the cliffhanger without bloating the context.
+const CONTINUITY_TAIL_CHARS = 600;
 
 export async function runBatchStage(input: {
   batchId: string;
@@ -41,39 +51,51 @@ export async function runBatchStage(input: {
     if (input.signal?.aborted) throw new Error("已取消");
     try {
       updateBatchItem(item.id, { status: `${input.stage}_running` as BatchItem["status"], error: "" });
-      const messages =
-        input.stage === "creative"
-          ? buildCreativeMessages(project, item)
-          : input.stage === "screenplay"
-          ? buildScreenplayMessages(project, item)
-          : buildStoryboardMessages(project, item);
-      const content = await collectLLM(cfg, messages, {
-        temperature: input.stage === "creative" ? 0.75 : 0.65,
-        maxTokens: TOKEN_BUDGETS.longArtifact,
-        signal: input.signal,
-      });
-      let patch: Partial<BatchItem> & { status: BatchItem["status"]; error: string };
       if (input.stage === "creative") {
+        const content = await collectLLM(cfg, buildCreativeMessages(project, item), {
+          temperature: 0.75,
+          maxTokens: TOKEN_BUDGETS.longArtifact,
+          signal: input.signal,
+        });
         const parsed = parseCreativeStructured(content);
-        patch = {
+        updateBatchItem(item.id, {
           ...parsed,
           creativeMd: renderCreativeMd(parsed, content),
           status: "creative_ready",
           error: "",
-        };
+        });
       } else if (input.stage === "screenplay") {
-        patch = { screenplayMd: content, status: "screenplay_ready", error: "" };
+        const screenplay = await generateScreenplayChunked(cfg, project, item, input.signal);
+        updateBatchItem(item.id, {
+          screenplayMd: screenplay,
+          status: "screenplay_ready",
+          error: "",
+        });
       } else {
-        patch = { storyboardMd: content, status: "storyboard_ready", error: "" };
+        const storyboard = await generateStoryboardChunked(cfg, project, item, input.signal);
+        updateBatchItem(item.id, {
+          storyboardMd: storyboard,
+          status: "storyboard_ready",
+          error: "",
+        });
       }
-      updateBatchItem(item.id, patch);
       updated += 1;
     } catch (err) {
       failed += 1;
-      updateBatchItem(item.id, {
+      // Persist any partial output the chunk runner accumulated, so a failed
+      // run doesn't lose what was already generated. The chunk helpers attach
+      // the partial as `(err as any).partial`.
+      const partial =
+        err && typeof err === "object" && "partial" in err
+          ? (err as { partial?: string }).partial ?? ""
+          : "";
+      const patch: Partial<BatchItem> & { status: BatchItem["status"]; error: string } = {
         status: "failed",
         error: err instanceof Error ? err.message : String(err),
-      });
+      };
+      if (partial && input.stage === "screenplay") patch.screenplayMd = partial;
+      if (partial && input.stage === "storyboard") patch.storyboardMd = partial;
+      updateBatchItem(item.id, patch);
     }
   });
   updateBatchProject(project.id, { status: `${input.stage}_ready` });
@@ -327,4 +349,150 @@ async function collectLLM(
     else if (ev.type === "error") throw new Error(ev.message);
   }
   return acc.trim();
+}
+
+interface PartialError extends Error {
+  partial?: string;
+}
+
+function partialError(message: string, partial: string): PartialError {
+  const err = new Error(message) as PartialError;
+  err.partial = partial;
+  return err;
+}
+
+function chunkRanges(total: number, size: number): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (let start = 1; start <= total; start += size) {
+    const end = Math.min(total, start + size - 1);
+    ranges.push([start, end]);
+  }
+  return ranges;
+}
+
+async function generateScreenplayChunked(
+  cfg: LLMConfig,
+  project: BatchProject,
+  item: BatchItem,
+  signal: AbortSignal | undefined
+): Promise<string> {
+  const ranges = chunkRanges(project.totalEpisodes, EPISODES_PER_CHUNK);
+  const parts: string[] = [];
+  for (const [start, end] of ranges) {
+    if (signal?.aborted) {
+      throw partialError("已取消", parts.join("\n\n"));
+    }
+    const previousTail = parts.length > 0 ? tail(parts[parts.length - 1], CONTINUITY_TAIL_CHARS) : "";
+    const messages = buildScreenplayChunkMessages(project, item, start, end, previousTail);
+    let content = "";
+    try {
+      content = await collectLLM(cfg, messages, {
+        temperature: 0.65,
+        maxTokens: TOKEN_BUDGETS.longArtifact,
+        signal,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw partialError(
+        `第 ${start}-${end} 集生成失败：${reason}`,
+        joinParts(parts)
+      );
+    }
+    if (!content.trim()) {
+      throw partialError(
+        `第 ${start}-${end} 集 LLM 返回空内容`,
+        joinParts(parts)
+      );
+    }
+    parts.push(stripStraySummary(content));
+  }
+  return joinParts(parts);
+}
+
+async function generateStoryboardChunked(
+  cfg: LLMConfig,
+  project: BatchProject,
+  item: BatchItem,
+  signal: AbortSignal | undefined
+): Promise<string> {
+  const ranges = chunkRanges(project.totalEpisodes, EPISODES_PER_CHUNK);
+  const screenplaySlices = sliceScreenplayByEpisodes(item.screenplayMd, ranges);
+  const parts: string[] = [];
+  for (let i = 0; i < ranges.length; i += 1) {
+    const [start, end] = ranges[i];
+    if (signal?.aborted) {
+      throw partialError("已取消", joinParts(parts));
+    }
+    const slice = screenplaySlices[i] || "";
+    if (!slice.trim()) {
+      // No screenplay content for this range — skip rather than burn tokens.
+      continue;
+    }
+    const messages = buildStoryboardChunkMessages(project, item, slice, start, end);
+    let content = "";
+    try {
+      content = await collectLLM(cfg, messages, {
+        temperature: 0.6,
+        maxTokens: TOKEN_BUDGETS.longArtifact,
+        signal,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw partialError(
+        `第 ${start}-${end} 集分镜生成失败：${reason}`,
+        joinParts(parts)
+      );
+    }
+    if (!content.trim()) {
+      throw partialError(
+        `第 ${start}-${end} 集分镜 LLM 返回空内容`,
+        joinParts(parts)
+      );
+    }
+    parts.push(stripStraySummary(content));
+  }
+  return joinParts(parts);
+}
+
+function joinParts(parts: string[]): string {
+  return parts.map((part) => part.trim()).filter(Boolean).join("\n\n");
+}
+
+function tail(text: string, chars: number): string {
+  if (text.length <= chars) return text;
+  return text.slice(-chars);
+}
+
+// Strip trailing model self-talk like "本批次结束 / 待续 / continued..." so the
+// concatenated output reads as one document.
+function stripStraySummary(text: string): string {
+  return text
+    .replace(/(?:^|\n)(?:本批次结束|待续|未完待续|continued|to be continued|END OF CHUNK)[\s\S]*$/i, "")
+    .trim();
+}
+
+function sliceScreenplayByEpisodes(
+  screenplay: string,
+  ranges: Array<[number, number]>
+): string[] {
+  if (!screenplay) return ranges.map(() => "");
+  const lines = screenplay.split(/\r?\n/);
+  // Map of episodeNumber -> [startLine, endLineExclusive]
+  const epStart = new Map<number, number>();
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].trim().match(/^第\s*(\d+)\s*集\s*$/);
+    if (match) {
+      const n = Number(match[1]);
+      if (!Number.isNaN(n) && !epStart.has(n)) epStart.set(n, i);
+    }
+  }
+  return ranges.map(([start, end]) => {
+    const startLine = epStart.get(start);
+    if (startLine === undefined) return "";
+    let endLine = lines.length;
+    // Find the line where 第 (end+1) 集 starts; that's where the slice stops.
+    const next = epStart.get(end + 1);
+    if (next !== undefined) endLine = next;
+    return lines.slice(startLine, endLine).join("\n").trim();
+  });
 }

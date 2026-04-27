@@ -112,21 +112,20 @@ export function BatchFactoryClient() {
   const [importText, setImportText] = React.useState("");
 
   const refreshList = React.useCallback(async () => {
-    setLoading(true);
     try {
       const data = await api<{ items: BatchProject[] }>("/api/batches");
       setBatches(data.items);
-      if (!active && data.items[0]) setActive(data.items[0]);
+      setActive((prev) => prev ?? data.items[0] ?? null);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [active]);
+  }, []);
 
   const refreshActive = React.useCallback(async (id: string) => {
     const data = await api<{ item: BatchProject; items: BatchItem[] }>(`/api/batches/${id}`);
-    setActive(data.item);
+    setActive((prev) => (prev && prev.id === data.item.id ? data.item : prev ?? data.item));
     setItems(data.items);
   }, []);
 
@@ -676,6 +675,32 @@ function ReviewBox({
   onImportText: (value: string) => void;
   onImport: (() => void) | null;
 }) {
+  const [dragging, setDragging] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const ingestFile = React.useCallback(
+    async (file: File) => {
+      if (!file) return;
+      const name = file.name.toLowerCase();
+      if (!name.endsWith(".csv") && file.type && !file.type.includes("csv") && !file.type.includes("text")) {
+        toast.error("只支持 .csv 文件");
+        return;
+      }
+      try {
+        const text = await file.text();
+        if (!text.trim()) {
+          toast.error("文件内容为空");
+          return;
+        }
+        onImportText(text);
+        toast.success(`已读取 ${file.name}（${text.length} 字符），点「导入审核 CSV」继续`);
+      } catch (err) {
+        toast.error((err as Error).message ?? "读取文件失败");
+      }
+    },
+    [onImportText]
+  );
+
   return (
     <div className="space-y-3">
       <div>
@@ -688,18 +713,64 @@ function ReviewBox({
         {active && stage === "storyboard" && <DownloadLink id={active.id} stage="sources" format="zip" label="导出 Zip" />}
       </div>
       {onImport && (
-        <div className="grid gap-3 md:grid-cols-[1fr_170px]">
-          <Textarea
-            rows={5}
-            value={importText}
-            onChange={(e) => onImportText(e.target.value)}
-            placeholder="粘贴审核后的 CSV。删除的行会自动取消本步骤入选，保留的行进入下一步。"
-          />
-          <Button className="self-stretch" onClick={onImport} disabled={!importText.trim() || busy === "import"}>
-            {busy === "import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-            导入审核 CSV
-          </Button>
-        </div>
+        <>
+          <div
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragging(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragging(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) void ingestFile(file);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={`flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed px-3 py-3 text-xs transition ${
+              dragging
+                ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-text)]"
+                : "border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] text-[color:var(--color-muted)] hover:border-[color:var(--color-primary)]/40"
+            }`}
+          >
+            <FileUp className="h-4 w-4" />
+            <span>{dragging ? "松开即可读取 CSV" : "拖拽 CSV 文件到这里，或点击选择文件"}</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void ingestFile(file);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_170px]">
+            <Textarea
+              rows={5}
+              value={importText}
+              onChange={(e) => onImportText(e.target.value)}
+              placeholder="或直接粘贴审核后的 CSV。删除的行会自动取消本步骤入选，保留的行进入下一步。"
+            />
+            <Button className="self-stretch" onClick={onImport} disabled={!importText.trim() || busy === "import"}>
+              {busy === "import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+              导入审核 CSV
+            </Button>
+          </div>
+        </>
       )}
     </div>
   );
