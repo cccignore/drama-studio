@@ -398,9 +398,31 @@ async function generateScreenplayChunked(
   signal: AbortSignal | undefined
 ): Promise<string> {
   const total = project.totalEpisodes;
-  let cursor = 1; // next episode number that still needs writing
-  let aggregate = ""; // running screenplay text (already cleaned)
+  // Resume support: if the item already carries partial screenplay output,
+  // start from where it left off instead of regenerating episodes 1..N.
+  let aggregate = (item.screenplayMd || "").trim();
+  // If the existing partial ends mid-episode, drop the half-written tail so
+  // the next chunk doesn't see a broken header.
+  if (aggregate) {
+    const lastFull = lastCompleteEpisodeNumber(aggregate);
+    if (lastFull !== null) {
+      aggregate = trimToEpisode(aggregate, lastFull);
+    } else {
+      // No fully-finished episode recoverable — start from scratch.
+      aggregate = "";
+    }
+  }
+  const startedFrom = aggregate ? lastCompleteEpisodeNumber(aggregate) ?? 0 : 0;
+  let cursor = startedFrom + 1;
   let iter = 0;
+  console.warn(
+    `[batch-screenplay] resume cursor=${cursor} (already complete: ${startedFrom}/${total})`
+  );
+  // Persist the trimmed aggregate so the UI's "已生成 N/总 集" badge stays
+  // honest even if we crash before the first new chunk lands.
+  if (aggregate && aggregate !== item.screenplayMd) {
+    updateBatchItem(item.id, { screenplayMd: aggregate });
+  }
   while (cursor <= total) {
     if (signal?.aborted) throw partialError("已取消", aggregate);
     if (iter >= MAX_CHUNK_ITERATIONS) {
@@ -448,6 +470,9 @@ async function generateScreenplayChunked(
     } else {
       cursor = lastFullEpisode + 1;
     }
+    // Checkpoint: persist current aggregate so the UI's progress badge
+    // updates between chunks and a crash here doesn't lose work.
+    updateBatchItem(item.id, { screenplayMd: aggregate });
   }
   return aggregate.trim();
 }
@@ -459,9 +484,25 @@ async function generateStoryboardChunked(
   signal: AbortSignal | undefined
 ): Promise<string> {
   const total = project.totalEpisodes;
-  let cursor = 1;
-  let aggregate = "";
+  // Resume support, mirrors the screenplay logic.
+  let aggregate = (item.storyboardMd || "").trim();
+  if (aggregate) {
+    const lastFull = lastStoryboardEpisode(aggregate);
+    if (lastFull !== null) {
+      aggregate = trimToStoryboardEpisode(aggregate, lastFull);
+    } else {
+      aggregate = "";
+    }
+  }
+  const startedFrom = aggregate ? lastStoryboardEpisode(aggregate) ?? 0 : 0;
+  let cursor = startedFrom + 1;
   let iter = 0;
+  console.warn(
+    `[batch-storyboard] resume cursor=${cursor} (already complete: ${startedFrom}/${total})`
+  );
+  if (aggregate && aggregate !== item.storyboardMd) {
+    updateBatchItem(item.id, { storyboardMd: aggregate });
+  }
   while (cursor <= total) {
     if (signal?.aborted) throw partialError("已取消", aggregate);
     if (iter >= MAX_CHUNK_ITERATIONS) {
@@ -500,6 +541,8 @@ async function generateStoryboardChunked(
       aggregate = trimToStoryboardEpisode(aggregate, lastFullEpisode);
     }
     cursor = lastFullEpisode + 1;
+    // Checkpoint to DB so progress is visible between chunks.
+    updateBatchItem(item.id, { storyboardMd: aggregate });
   }
   return aggregate.trim();
 }
