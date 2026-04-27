@@ -1007,18 +1007,23 @@ function isRunStage(value: BusyState | null): value is Stage {
 
 function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
   // CSV-is-truth: every row in the batch is "in". A row is targeted for a
-  // stage iff it has the prerequisite data and not yet the output for it.
+  // stage iff (a) it has the prerequisite data and not yet the output for
+  // it, OR (b) the previous run ended in `failed` so the user can retry.
   if (stage === "creative") {
     return items
-      .filter((item) => item.sourceText && !item.creativeMd && !item.act1)
+      .filter((item) => item.sourceText && ((!item.creativeMd && !item.act1) || item.status === "failed"))
       .map((item) => item.id);
   }
   if (stage === "screenplay") {
     return items
-      .filter((item) => (item.creativeMd || item.act1) && !item.screenplayMd)
+      .filter(
+        (item) => (item.creativeMd || item.act1) && (!item.screenplayMd || item.status === "failed")
+      )
       .map((item) => item.id);
   }
-  return items.filter((item) => item.screenplayMd && !item.storyboardMd).map((item) => item.id);
+  return items
+    .filter((item) => item.screenplayMd && (!item.storyboardMd || item.status === "failed"))
+    .map((item) => item.id);
 }
 
 function stageStats(info: RunInfo, items: BatchItem[]) {

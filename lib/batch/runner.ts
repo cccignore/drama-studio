@@ -109,19 +109,31 @@ function resolveConfigForBatchStage(stage: BatchStage): LLMConfig | null {
 }
 
 function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: boolean): BatchItem[] {
+  // A row is targeted if its current artifact slot is missing OR the previous
+  // run ended in `failed` (so the user can hit retry without manually clearing
+  // partial output).
   if (stage === "creative") {
     return items.filter(
-      (item) => item.sourceText && !item.creativeMd && !item.act1 && (!selectedOnly || item.ideaSelected)
+      (item) =>
+        item.sourceText &&
+        ((!item.creativeMd && !item.act1) || item.status === "failed") &&
+        (!selectedOnly || item.ideaSelected)
     );
   }
   if (stage === "screenplay") {
     return items.filter(
-      (item) => (item.creativeMd || item.act1) && !item.screenplayMd && (!selectedOnly || item.creativeSelected)
+      (item) =>
+        (item.creativeMd || item.act1) &&
+        (!item.screenplayMd || item.status === "failed") &&
+        (!selectedOnly || item.creativeSelected)
     );
   }
   if (stage === "storyboard") {
     return items.filter(
-      (item) => item.screenplayMd && !item.storyboardMd && (!selectedOnly || item.screenplaySelected)
+      (item) =>
+        item.screenplayMd &&
+        (!item.storyboardMd || item.status === "failed") &&
+        (!selectedOnly || item.screenplaySelected)
     );
   }
   return [];
@@ -383,27 +395,14 @@ async function generateScreenplayChunked(
       throw partialError("已取消", parts.join("\n\n"));
     }
     const previousTail = parts.length > 0 ? tail(parts[parts.length - 1], CONTINUITY_TAIL_CHARS) : "";
-    const messages = buildScreenplayChunkMessages(project, item, start, end, previousTail);
-    let content = "";
-    try {
-      content = await collectLLM(cfg, messages, {
-        temperature: 0.65,
-        maxTokens: TOKEN_BUDGETS.longArtifact,
-        signal,
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      throw partialError(
-        `第 ${start}-${end} 集生成失败：${reason}`,
-        joinParts(parts)
-      );
-    }
-    if (!content.trim()) {
-      throw partialError(
-        `第 ${start}-${end} 集 LLM 返回空内容`,
-        joinParts(parts)
-      );
-    }
+    const content = await runChunkWithRetry({
+      label: `第 ${start}-${end} 集`,
+      buildMessages: () => buildScreenplayChunkMessages(project, item, start, end, previousTail),
+      cfg,
+      signal,
+      temperature: 0.65,
+      partialSoFar: () => joinParts(parts),
+    });
     parts.push(stripStraySummary(content));
   }
   return joinParts(parts);
@@ -424,31 +423,15 @@ async function generateStoryboardChunked(
       throw partialError("已取消", joinParts(parts));
     }
     const slice = screenplaySlices[i] || "";
-    if (!slice.trim()) {
-      // No screenplay content for this range — skip rather than burn tokens.
-      continue;
-    }
-    const messages = buildStoryboardChunkMessages(project, item, slice, start, end);
-    let content = "";
-    try {
-      content = await collectLLM(cfg, messages, {
-        temperature: 0.6,
-        maxTokens: TOKEN_BUDGETS.longArtifact,
-        signal,
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      throw partialError(
-        `第 ${start}-${end} 集分镜生成失败：${reason}`,
-        joinParts(parts)
-      );
-    }
-    if (!content.trim()) {
-      throw partialError(
-        `第 ${start}-${end} 集分镜 LLM 返回空内容`,
-        joinParts(parts)
-      );
-    }
+    if (!slice.trim()) continue;
+    const content = await runChunkWithRetry({
+      label: `第 ${start}-${end} 集分镜`,
+      buildMessages: () => buildStoryboardChunkMessages(project, item, slice, start, end),
+      cfg,
+      signal,
+      temperature: 0.6,
+      partialSoFar: () => joinParts(parts),
+    });
     parts.push(stripStraySummary(content));
   }
   return joinParts(parts);
@@ -495,4 +478,52 @@ function sliceScreenplayByEpisodes(
     if (next !== undefined) endLine = next;
     return lines.slice(startLine, endLine).join("\n").trim();
   });
+}
+
+// Run one chunk LLM call with retry on empty content / stream errors.
+//
+// Why retry empty: yunwu (and similar OpenAI-compatible relays) sometimes
+// silently close GPT-5.4 streams after ~5 min of idle (the model is still
+// reasoning and hasn't emitted any visible token yet). The HTTP response is
+// 200 with [DONE] but zero deltas — our collectLLM then returns "". A second
+// attempt almost always succeeds because the relay re-establishes a fresh
+// connection. We retry up to MAX_CHUNK_ATTEMPTS times before bubbling
+// up as a partialError so the surrounding code can persist what's done.
+const MAX_CHUNK_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = 4000;
+
+async function runChunkWithRetry(opts: {
+  label: string;
+  buildMessages: () => LLMMessage[];
+  cfg: LLMConfig;
+  signal: AbortSignal | undefined;
+  temperature: number;
+  partialSoFar: () => string;
+}): Promise<string> {
+  let lastReason = "";
+  for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt += 1) {
+    if (opts.signal?.aborted) throw partialError("已取消", opts.partialSoFar());
+    try {
+      const content = await collectLLM(opts.cfg, opts.buildMessages(), {
+        temperature: opts.temperature,
+        maxTokens: TOKEN_BUDGETS.longArtifact,
+        signal: opts.signal,
+      });
+      if (content.trim()) return content;
+      lastReason = "LLM 返回空内容（疑似上游空闲超时或风控）";
+    } catch (err) {
+      lastReason = err instanceof Error ? err.message : String(err);
+    }
+    console.warn(
+      `[batch-chunk-retry] ${opts.label} attempt ${attempt}/${MAX_CHUNK_ATTEMPTS} failed: ${lastReason}`
+    );
+    if (attempt < MAX_CHUNK_ATTEMPTS) {
+      await sleep(RETRY_BACKOFF_MS * attempt);
+    }
+  }
+  throw partialError(`${opts.label}生成失败：${lastReason}`, opts.partialSoFar());
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
