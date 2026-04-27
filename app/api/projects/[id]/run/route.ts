@@ -7,6 +7,7 @@ import { getProject, logEvent, updateProject } from "@/lib/drama/store";
 import { resolveConfigForCommand } from "@/lib/llm/router";
 import { streamLLM } from "@/lib/llm/stream";
 import { getLLMConfig } from "@/lib/llm/store";
+import { TOKEN_BUDGETS } from "@/lib/llm/budgets";
 import {
   canRunCommand,
   advanceAfter,
@@ -293,7 +294,7 @@ async function runAgentTask({
   title,
   episode,
   temperature = 0.4,
-  maxTokens = 1200,
+  maxTokens = TOKEN_BUDGETS.shortDraft,
 }: {
   cfg: LLMConfig;
   messages: LLMMessage[];
@@ -344,7 +345,7 @@ async function runPing({ cfg, args, send, signal }: RunCtx) {
       { role: "system", content: "你是一位专业的短剧编剧助手。" },
       { role: "user", content: userMsg },
     ],
-    { temperature: 0.7, maxTokens: 256, signal },
+    { temperature: 0.7, maxTokens: TOKEN_BUDGETS.classify, signal },
     send
   );
   send({ type: "artifact", name: "ping-echo", length: acc.length });
@@ -378,7 +379,7 @@ async function runStart({ cfg, project, args, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.75, maxTokens: 1500, signal },
+    { temperature: 0.75, maxTokens: TOKEN_BUDGETS.briefDraft, signal },
     send
   );
   const artifact = saveArtifact({ projectId: project.id, name: "start-card", content });
@@ -413,7 +414,7 @@ async function runCreative({ cfg, project, args, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.8, maxTokens: 2400, signal },
+    { temperature: 0.8, maxTokens: TOKEN_BUDGETS.longArtifact, signal },
     send
   );
   const art = extractCreative(content);
@@ -462,7 +463,7 @@ async function runPlan({ cfg, project, send, signal }: RunCtx) {
       role: "planner",
       title: "Planner 节奏骨架",
       temperature: 0.45,
-      maxTokens: 1400,
+      maxTokens: TOKEN_BUDGETS.shortDraft,
     });
     criticNotes = await runAgentTask({
       cfg: resolveConfigForCommand("review", project.id) ?? cfg,
@@ -472,7 +473,7 @@ async function runPlan({ cfg, project, send, signal }: RunCtx) {
       role: "critic",
       title: "Critic 节奏审校",
       temperature: 0.2,
-      maxTokens: 1000,
+      maxTokens: TOKEN_BUDGETS.microEdit,
     });
   }
 
@@ -492,7 +493,7 @@ async function runPlan({ cfg, project, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.7, maxTokens: 2200, signal },
+    { temperature: 0.7, maxTokens: TOKEN_BUDGETS.outlineDraft, signal },
     send
   );
   send({
@@ -538,7 +539,7 @@ async function runCharacters({ cfg, project, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.75, maxTokens: 3600, signal },
+    { temperature: 0.75, maxTokens: TOKEN_BUDGETS.longArtifact, signal },
     send
   );
   let normalizedContent = content;
@@ -557,7 +558,7 @@ async function runCharacters({ cfg, project, send, signal }: RunCtx) {
     const repair = await streamAndCollect(
       cfg,
       buildCharactersRepairMessages(project.state, content),
-      { temperature: 0.3, maxTokens: 900, signal },
+      { temperature: 0.3, maxTokens: TOKEN_BUDGETS.microEdit, signal },
       send,
       { streamPartial: false }
     );
@@ -606,7 +607,7 @@ async function runOutline({ cfg, project, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.7, maxTokens: 8000, signal },
+    { temperature: 0.7, maxTokens: TOKEN_BUDGETS.megaArtifact, signal },
     send
   );
   const parsed = parseDirectory(content);
@@ -714,7 +715,7 @@ async function runEpisode(ctx: RunCtx) {
         title: "Planner 单集 Beat Sheet",
         episode: epIdx,
         temperature: 0.5,
-        maxTokens: 1200,
+        maxTokens: TOKEN_BUDGETS.shortDraft,
       });
       polishNotes = await runAgentTask({
         cfg: resolveConfigForCommand("review", project.id) ?? cfg,
@@ -725,7 +726,7 @@ async function runEpisode(ctx: RunCtx) {
         title: "Critic 单集审校意见",
         episode: epIdx,
         temperature: 0.2,
-        maxTokens: 900,
+        maxTokens: TOKEN_BUDGETS.microEdit,
       });
     }
 
@@ -770,7 +771,7 @@ async function runEpisode(ctx: RunCtx) {
     const content = await streamAndCollect(
       cfg,
       messages,
-      { temperature: 0.8, maxTokens: 3200, signal },
+      { temperature: 0.8, maxTokens: TOKEN_BUDGETS.longArtifact, signal },
       send
     );
     send({
@@ -884,7 +885,7 @@ async function runReview(ctx: RunCtx) {
       rawContent = await streamAndCollect(
         cfg,
         messages,
-        { temperature: 0.3, maxTokens: 1800, signal },
+        { temperature: 0.3, maxTokens: TOKEN_BUDGETS.reviewJson, signal },
         send
       );
       review = extractReviewJson(rawContent);
@@ -1014,7 +1015,7 @@ async function runStoryboard(ctx: RunCtx) {
     const content = await streamAndCollect(
       cfg,
       messages,
-      { temperature: 0.5, maxTokens: 4200, signal },
+      { temperature: 0.5, maxTokens: TOKEN_BUDGETS.longArtifact, signal },
       send
     );
     const doc = parseStoryboard(content);
@@ -1087,7 +1088,7 @@ async function runOverseas({ cfg, project, send, signal }: RunCtx) {
   const content = await streamAndCollect(
     cfg,
     messages,
-    { temperature: 0.55, maxTokens: 2200, signal },
+    { temperature: 0.55, maxTokens: TOKEN_BUDGETS.outlineDraft, signal },
     send
   );
   const artifact = saveArtifact({
@@ -1141,7 +1142,7 @@ async function runCompliance({ cfg, project, send, signal }: RunCtx) {
     rawContent = await streamAndCollect(
       cfg,
       messages,
-      { temperature: 0.2, maxTokens: 2600, signal },
+      { temperature: 0.2, maxTokens: TOKEN_BUDGETS.reviewJson, signal },
       send,
       { streamPartial: false }
     );

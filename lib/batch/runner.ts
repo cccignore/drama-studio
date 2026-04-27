@@ -1,3 +1,4 @@
+import { TOKEN_BUDGETS } from "../llm/budgets";
 import { resolveConfigForCommand } from "../llm/router";
 import { streamLLM } from "../llm/stream";
 import type { LLMConfig, LLMMessage } from "../llm/types";
@@ -48,7 +49,7 @@ export async function runBatchStage(input: {
           : buildStoryboardMessages(project, item);
       const content = await collectLLM(cfg, messages, {
         temperature: input.stage === "creative" ? 0.75 : 0.65,
-        maxTokens: input.stage === "creative" ? 2600 : input.stage === "screenplay" ? 7000 : 7000,
+        maxTokens: TOKEN_BUDGETS.longArtifact,
         signal: input.signal,
       });
       const patch =

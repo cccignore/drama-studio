@@ -9,6 +9,7 @@ import { appendStepConversation, listStepConversations } from "@/lib/drama/conve
 import { getProject, logEvent } from "@/lib/drama/store";
 import { applyPatches, parseRevisePatch, type RevisePatch } from "@/lib/drama/revise/patch";
 import { artifactCommandFor, buildRevisePrompt, buildRewritePrompt } from "@/lib/drama/revise/prompts";
+import { TOKEN_BUDGETS } from "@/lib/llm/budgets";
 import { resolveConfigForCommand } from "@/lib/llm/router";
 import { streamLLM } from "@/lib/llm/stream";
 import type { LLMConfig, LLMMessage } from "@/lib/llm/types";
@@ -93,7 +94,7 @@ async function runRevise({
   const raw = await collectLLM(
     cfg,
     buildRevisePrompt(artifactName, latest.content, instruction, recent, "patch"),
-    { temperature: 0.25, maxTokens: 1800, signal },
+    { temperature: 0.25, maxTokens: TOKEN_BUDGETS.reviewJson, signal },
     send
   );
   let patch: RevisePatch;
@@ -181,7 +182,7 @@ async function rewriteArtifact({
     await collectLLM(
       cfg,
       buildRewritePrompt(artifactName, latest.content, instruction, recent),
-      { temperature: 0.45, maxTokens: 4200, signal },
+      { temperature: 0.45, maxTokens: TOKEN_BUDGETS.longArtifact, signal },
       send
     )
   );

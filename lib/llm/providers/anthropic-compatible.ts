@@ -1,4 +1,5 @@
 import type { LLMConfig, LLMMessage, LLMStreamEvent, LLMCallOptions } from "../types";
+import { TOKEN_BUDGETS } from "../budgets";
 import { iterSSELines } from "../sse-parse";
 import { friendlyNetworkError, friendlyUpstreamError } from "../provider-error";
 import { fetchWithRetry } from "../retry";
@@ -25,7 +26,7 @@ export async function* streamAnthropicCompat(
   const body = JSON.stringify({
     model: cfg.model,
     stream: true,
-    max_tokens: opts.maxTokens ?? 4096,
+    max_tokens: opts.maxTokens ?? TOKEN_BUDGETS.longArtifact,
     temperature: opts.temperature ?? 0.7,
     ...(system ? { system } : {}),
     messages: dialog,
