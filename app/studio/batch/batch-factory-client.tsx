@@ -145,6 +145,30 @@ export function BatchFactoryClient() {
     return () => window.clearInterval(timer);
   }, [active?.id, busy, refreshActive]);
 
+  // Reconcile `busy` and `runInfo` against database reality. This handles
+  // page refresh during a run: the polling kicks in from server state and
+  // BatchRunMonitor shows the correct stage/progress without the user having
+  // to click "开始生成" again. It also clears `busy` once no item is still
+  // in a `*_running` state (the run finished while the page was open).
+  React.useEffect(() => {
+    if (!active) return;
+    const stages: Stage[] = ["creative", "screenplay", "storyboard"];
+    const stageWithRunning = stages.find((stage) =>
+      items.some((item) => item.status === `${stage}_running`)
+    );
+    if (stageWithRunning) {
+      const ids = items.filter((item) => item.status === `${stageWithRunning}_running`).map((item) => item.id);
+      setBusy((prev) => (prev === stageWithRunning ? prev : stageWithRunning));
+      setRunInfo((prev) => {
+        if (prev && prev.stage === stageWithRunning) return prev;
+        return { stage: stageWithRunning, targetIds: ids, startedAt: Date.now() };
+      });
+    } else if (isRunStage(busy)) {
+      // Nothing is running anymore; clear the spinner.
+      setBusy(null);
+    }
+  }, [items, active?.id, busy]);
+
   async function createBatch() {
     setBusy("create");
     try {
@@ -190,17 +214,25 @@ export function BatchFactoryClient() {
     setRunInfo({ stage, targetIds, startedAt: Date.now() });
     setBusy(stage);
     try {
-      const data = await api<{ result: { created: number; updated: number; failed: number } }>(
+      // The API now hands the run off to a process-scope supervisor and
+      // returns immediately. The polling effect picks up progress from the
+      // database via /api/batches/{id}.
+      const data = await api<{ run: { state: "started" | "already_running"; startedAt: number } }>(
         `/api/batches/${active.id}/run`,
         { method: "POST", body: JSON.stringify({ stage, selectedOnly: true, batchSize }) }
       );
-      toast.success(`完成：更新 ${data.result.updated}，失败 ${data.result.failed}`);
+      if (data.run.state === "already_running") {
+        toast.message(`同名批次已在生成中，将继续显示进度`);
+      } else {
+        toast.success(`已派发到后端，刷新页面也不会中断`);
+      }
       await refreshActive(active.id);
     } catch (err) {
       toast.error((err as Error).message);
-    } finally {
       setBusy(null);
     }
+    // NOTE: we do NOT clear `busy` here — the polling effect below clears it
+    // once every targeted item has left its `*_running` status.
   }
 
   async function importCsv() {
@@ -622,7 +654,7 @@ function GenerationStep({
             </Button>
           </div>
           {runInfo?.stage === step && (
-            <BatchRunMonitor info={runInfo} items={items} running={busy === step} onRefresh={onRefresh} />
+            <BatchRunMonitor info={runInfo} items={items} running={busy === step} onRefresh={onRefresh} totalEpisodes={active.totalEpisodes} />
           )}
         </div>
         <ReviewBox
@@ -943,15 +975,27 @@ function BatchRunMonitor({
   items,
   running,
   onRefresh,
+  totalEpisodes,
 }: {
   info: RunInfo;
   items: BatchItem[];
   running: boolean;
   onRefresh: () => void;
+  totalEpisodes: number;
 }) {
   const stats = stageStats(info, items);
   const percent = stats.total === 0 ? 100 : Math.round(((stats.done + stats.failed) / stats.total) * 100);
   const elapsed = Math.max(0, Math.round((Date.now() - info.startedAt) / 1000));
+  // Per-item episode progress (only meaningful for screenplay/storyboard).
+  const perItemProgress: Array<{ item: BatchItem; completed: number }> = [];
+  if (info.stage === "screenplay" || info.stage === "storyboard") {
+    const stageNarrow = info.stage; // narrow once for TS
+    for (const item of items) {
+      if (!info.targetIds.includes(item.id)) continue;
+      const md = stageNarrow === "screenplay" ? item.screenplayMd : item.storyboardMd;
+      perItemProgress.push({ item, completed: countCompleteEpisodes(md, stageNarrow) });
+    }
+  }
   return (
     <div className="rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -963,6 +1007,9 @@ function BatchRunMonitor({
           <div className="mt-1 text-xs text-[color:var(--color-muted)]">
             目标 {stats.total} · 运行中 {stats.running} · 已完成 {stats.done} · 失败 {stats.failed} · 已用 {elapsed}s
           </div>
+          <div className="mt-1 text-xs text-[color:var(--color-muted)]">
+            生成期间可以刷新页面或关闭浏览器，任务在后端继续跑；回到页面会自动恢复进度显示。
+          </div>
         </div>
         <Button type="button" variant="ghost" size="sm" onClick={onRefresh}>
           <RefreshCcw className="h-4 w-4" /> 刷新状态
@@ -971,8 +1018,55 @@ function BatchRunMonitor({
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-[color:var(--color-surface)]">
         <div className="h-full bg-[color:var(--color-primary)] transition-all" style={{ width: `${percent}%` }} />
       </div>
+      {perItemProgress.length > 0 && totalEpisodes > 0 && (
+        <div className="mt-3 space-y-1.5 text-[11px]">
+          {perItemProgress.map(({ item, completed }) => {
+            const ratio = totalEpisodes > 0 ? Math.min(100, Math.round((completed / totalEpisodes) * 100)) : 0;
+            return (
+              <div key={item.id} className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-[color:var(--color-muted)]">
+                  {item.title || item.sourceTitle || item.id}
+                </span>
+                <span className="shrink-0 font-mono">
+                  {completed}/{totalEpisodes} 集
+                </span>
+                <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-[color:var(--color-surface)]">
+                  <div className="h-full bg-[color:var(--color-primary)]/70 transition-all" style={{ width: `${ratio}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+// Counts how many episodes in `md` are "complete" — for screenplay we look
+// for the trailing `钩子：` block in each `第 N 集`; for storyboard we look
+// for at least one row body under each `## 第 N 集分镜`.
+function countCompleteEpisodes(md: string, stage: "screenplay" | "storyboard"): number {
+  if (!md) return 0;
+  if (stage === "screenplay") {
+    // Each complete episode has one 钩子: line.
+    return (md.match(/^钩子[:：]/gm) || []).length;
+  }
+  const lines = md.split(/\r?\n/);
+  let count = 0;
+  let currentEp: number | null = null;
+  let currentEpHasRow = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^##\s*第\s*(\d+)\s*集分镜/);
+    if (head) {
+      if (currentEp !== null && currentEpHasRow) count += 1;
+      currentEp = Number(head[1]);
+      currentEpHasRow = false;
+      continue;
+    }
+    if (currentEp !== null && /^\|\s*\d+\s*\|/.test(line)) currentEpHasRow = true;
+  }
+  if (currentEp !== null && currentEpHasRow) count += 1;
+  return count;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -1008,21 +1102,26 @@ function isRunStage(value: BusyState | null): value is Stage {
 function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
   // CSV-is-truth: every row in the batch is "in". A row is targeted for a
   // stage iff (a) it has the prerequisite data and not yet the output for
-  // it, OR (b) the previous run ended in `failed` so the user can retry.
+  // it, (b) the previous run ended in `failed`, OR (c) the row is in the
+  // matching `*_running` state — covers both "still running, hit retry to
+  // resume" and "container restarted mid-run, status got stuck".
+  const isResumable = (item: BatchItem, runningStatus: string): boolean =>
+    item.status === "failed" || item.status === runningStatus;
   if (stage === "creative") {
     return items
-      .filter((item) => item.sourceText && ((!item.creativeMd && !item.act1) || item.status === "failed"))
+      .filter((item) => item.sourceText && ((!item.creativeMd && !item.act1) || isResumable(item, "creative_running")))
       .map((item) => item.id);
   }
   if (stage === "screenplay") {
     return items
       .filter(
-        (item) => (item.creativeMd || item.act1) && (!item.screenplayMd || item.status === "failed")
+        (item) =>
+          (item.creativeMd || item.act1) && (!item.screenplayMd || isResumable(item, "screenplay_running"))
       )
       .map((item) => item.id);
   }
   return items
-    .filter((item) => item.screenplayMd && (!item.storyboardMd || item.status === "failed"))
+    .filter((item) => item.screenplayMd && (!item.storyboardMd || isResumable(item, "storyboard_running")))
     .map((item) => item.id);
 }
 

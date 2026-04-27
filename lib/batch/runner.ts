@@ -22,11 +22,12 @@ export interface RunBatchResult {
   failed: number;
 }
 
-// Episodes per LLM call. Keep small so a single call stays well below the
-// provider output cap (8k tokens ≈ ~12 short-drama episodes — we cap at 5 for
-// margin, since reasoning tokens, system tokens, and Markdown overhead eat
-// into the same budget).
-const EPISODES_PER_CHUNK = 5;
+// Episodes per LLM call. Each episode is dense (5–6 子场次, 1500–2500 字),
+// so 3-per-batch lands around 5000–7500 字 ≈ 4–6k tokens — comfortably under
+// the 12k longArtifact cap, leaving room for reasoning tokens and avoiding
+// length-cap retry loops. Earlier we used 5 here, which routinely tripped
+// finish_reason=length on every chunk.
+const EPISODES_PER_CHUNK = 3;
 // How many trailing characters of already-generated screenplay to feed into
 // the next chunk's prompt for continuity. ~600 chars ≈ a couple of子场次,
 // enough to pick up the cliffhanger without bloating the context.
@@ -110,13 +111,16 @@ function resolveConfigForBatchStage(stage: BatchStage): LLMConfig | null {
 
 function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: boolean): BatchItem[] {
   // A row is targeted if its current artifact slot is missing OR the previous
-  // run ended in `failed` (so the user can hit retry without manually clearing
-  // partial output).
+  // run ended in `failed` / left a zombie `*_running` state behind (e.g. the
+  // container restarted mid-run). Resuming is safe: the chunked runner reads
+  // existing partial output from the DB and continues from the cursor.
+  const isResumable = (status: BatchItem["status"], stageRunning: BatchItem["status"]): boolean =>
+    status === "failed" || status === stageRunning;
   if (stage === "creative") {
     return items.filter(
       (item) =>
         item.sourceText &&
-        ((!item.creativeMd && !item.act1) || item.status === "failed") &&
+        ((!item.creativeMd && !item.act1) || isResumable(item.status, "creative_running")) &&
         (!selectedOnly || item.ideaSelected)
     );
   }
@@ -124,7 +128,7 @@ function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: bool
     return items.filter(
       (item) =>
         (item.creativeMd || item.act1) &&
-        (!item.screenplayMd || item.status === "failed") &&
+        (!item.screenplayMd || isResumable(item.status, "screenplay_running")) &&
         (!selectedOnly || item.creativeSelected)
     );
   }
@@ -132,7 +136,7 @@ function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: bool
     return items.filter(
       (item) =>
         item.screenplayMd &&
-        (!item.storyboardMd || item.status === "failed") &&
+        (!item.storyboardMd || isResumable(item.status, "storyboard_running")) &&
         (!selectedOnly || item.screenplaySelected)
     );
   }

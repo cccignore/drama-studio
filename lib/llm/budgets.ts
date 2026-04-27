@@ -28,8 +28,10 @@ export const TOKEN_BUDGETS = {
   outlineDraft: 2400,
 
   // Long primary deliverables: creative, episode, storyboard, characters,
-  // long review, revise-rewrite, every batch-factory stage.
-  longArtifact: 8000,
+  // long review, revise-rewrite, every batch-factory stage. 12000 leaves
+  // headroom for GPT-class providers that allow 16k output without forcing
+  // the model into a length-cap loop on dense scripts.
+  longArtifact: 12000,
 
   // Outline (分集目录) — 80+ episode shows can legitimately need this.
   megaArtifact: 12000,
