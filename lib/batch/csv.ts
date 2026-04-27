@@ -1,4 +1,4 @@
-import type { BatchItem } from "./types";
+import type { BatchItem, BatchStage } from "./types";
 
 // New canonical CSV schema. Each row = one creative.
 // Order is chosen so that the most useful columns are leftmost in spreadsheets.
@@ -28,6 +28,40 @@ const HEADERS = [
 export function itemsToCsv(items: BatchItem[]): string {
   const rows = [HEADERS, ...items.map(itemToRow)];
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+// Simplified CSV intended for delivery / external review. Columns grow with
+// the pipeline stage so people only see what's actually been produced:
+//   creative   → 剧名 | 题材 | 三幕创意
+//   screenplay → + 完整剧本
+//   storyboard → + 分镜脚本
+// Not designed to round-trip: the import path still parses the legacy schema.
+export function itemsToSimpleCsv(items: BatchItem[], stage: BatchStage): string {
+  const headers = ["剧名", "题材", "三幕创意"];
+  if (stage === "screenplay" || stage === "storyboard") headers.push("完整剧本");
+  if (stage === "storyboard") headers.push("分镜脚本");
+  const rows = [headers, ...items.map((item) => simpleRow(item, stage))];
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function simpleRow(item: BatchItem, stage: BatchStage): string[] {
+  const row: string[] = [
+    item.title || item.sourceTitle || "",
+    item.storyType || "",
+    threeActs(item),
+  ];
+  if (stage === "screenplay" || stage === "storyboard") row.push(item.screenplayMd || "");
+  if (stage === "storyboard") row.push(item.storyboardMd || "");
+  return row;
+}
+
+function threeActs(item: BatchItem): string {
+  const blocks: string[] = [];
+  if (item.act1) blocks.push(`Act 1\n${item.act1}`);
+  if (item.act2) blocks.push(`Act 2\n${item.act2}`);
+  if (item.act3) blocks.push(`Act 3\n${item.act3}`);
+  if (blocks.length > 0) return blocks.join("\n\n");
+  return item.creativeMd || "";
 }
 
 function itemToRow(item: BatchItem): string[] {

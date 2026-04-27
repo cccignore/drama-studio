@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { AppError, toJsonError } from "@/lib/api/errors";
 import { buildBatchZip, renderBatchMarkdown } from "@/lib/batch/export";
-import { itemsToCsv } from "@/lib/batch/csv";
+import { itemsToCsv, itemsToSimpleCsv } from "@/lib/batch/csv";
 import { getBatchProject, listBatchItems } from "@/lib/batch/store";
 import type { BatchStage } from "@/lib/batch/types";
 
@@ -38,7 +38,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       mime = "text/markdown; charset=utf-8";
       ext = "md";
     } else {
-      body = itemsToCsv(items);
+      // sources stage keeps the full schema so the "export → edit → re-import"
+      // round-trip still works. Downstream stages use a simplified delivery
+      // schema whose column count grows with the pipeline stage.
+      body = stage === "sources" ? itemsToCsv(items) : itemsToSimpleCsv(items, stage);
       mime = "text/csv; charset=utf-8";
       ext = "csv";
     }
