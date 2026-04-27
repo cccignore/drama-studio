@@ -52,7 +52,7 @@ export async function runBatchStage(input: {
     try {
       updateBatchItem(item.id, { status: `${input.stage}_running` as BatchItem["status"], error: "" });
       if (input.stage === "creative") {
-        const content = await collectLLM(cfg, buildCreativeMessages(project, item), {
+        const { content } = await collectLLM(cfg, buildCreativeMessages(project, item), {
           temperature: 0.75,
           maxTokens: TOKEN_BUDGETS.longArtifact,
           signal: input.signal,
@@ -354,13 +354,21 @@ async function collectLLM(
   cfg: LLMConfig,
   messages: LLMMessage[],
   opts: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
-): Promise<string> {
+): Promise<{ content: string; finishReason?: string; errorCode?: string }> {
   let acc = "";
+  let finishReason: string | undefined;
   for await (const ev of streamLLM(cfg, messages, opts)) {
     if (ev.type === "delta") acc += ev.text;
-    else if (ev.type === "error") throw new Error(ev.message);
+    else if (ev.type === "done") finishReason = ev.finishReason;
+    else if (ev.type === "error") {
+      // Surface the error code so callers can decide whether to retry. We
+      // still throw so the chunk runner's catch path runs.
+      const err = new Error(ev.message) as Error & { code?: string };
+      err.code = ev.code;
+      throw err;
+    }
   }
-  return acc.trim();
+  return { content: acc.trim(), finishReason };
 }
 
 interface PartialError extends Error {
@@ -373,14 +381,11 @@ function partialError(message: string, partial: string): PartialError {
   return err;
 }
 
-function chunkRanges(total: number, size: number): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  for (let start = 1; start <= total; start += size) {
-    const end = Math.min(total, start + size - 1);
-    ranges.push([start, end]);
-  }
-  return ranges;
-}
+// Maximum number of LLM calls we'll spend on a single screenplay/storyboard
+// before giving up. With EPISODES_PER_CHUNK=5 and totalEpisodes up to ~80,
+// 32 attempts gives generous slack even when several chunks hit the truncate
+// path and need to be split further.
+const MAX_CHUNK_ITERATIONS = 32;
 
 async function generateScreenplayChunked(
   cfg: LLMConfig,
@@ -388,24 +393,59 @@ async function generateScreenplayChunked(
   item: BatchItem,
   signal: AbortSignal | undefined
 ): Promise<string> {
-  const ranges = chunkRanges(project.totalEpisodes, EPISODES_PER_CHUNK);
-  const parts: string[] = [];
-  for (const [start, end] of ranges) {
-    if (signal?.aborted) {
-      throw partialError("已取消", parts.join("\n\n"));
+  const total = project.totalEpisodes;
+  let cursor = 1; // next episode number that still needs writing
+  let aggregate = ""; // running screenplay text (already cleaned)
+  let iter = 0;
+  while (cursor <= total) {
+    if (signal?.aborted) throw partialError("已取消", aggregate);
+    if (iter >= MAX_CHUNK_ITERATIONS) {
+      throw partialError(
+        `批次迭代上限 ${MAX_CHUNK_ITERATIONS} 次后仍未写完所有集数（已写到第 ${cursor - 1} 集）`,
+        aggregate
+      );
     }
-    const previousTail = parts.length > 0 ? tail(parts[parts.length - 1], CONTINUITY_TAIL_CHARS) : "";
-    const content = await runChunkWithRetry({
+    iter += 1;
+    const start = cursor;
+    const end = Math.min(total, start + EPISODES_PER_CHUNK - 1);
+    const previousTail = tail(aggregate, CONTINUITY_TAIL_CHARS);
+    const { content, truncated } = await runChunkWithRetry({
       label: `第 ${start}-${end} 集`,
       buildMessages: () => buildScreenplayChunkMessages(project, item, start, end, previousTail),
       cfg,
       signal,
       temperature: 0.65,
-      partialSoFar: () => joinParts(parts),
+      partialSoFar: () => aggregate,
     });
-    parts.push(stripStraySummary(content));
+    const cleaned = stripStraySummary(content);
+    aggregate = aggregate ? `${aggregate}\n\n${cleaned}` : cleaned;
+    // Advance the cursor based on what was actually written. If the model
+    // hit max_tokens mid-batch and only completed up to e.g. episode 12 out
+    // of [11..15], we resume at 13 in the next call. Critical: we trust the
+    // last fully-written `第 N 集` header and roll back any half-written
+    // tail so the next chunk can rewrite it cleanly.
+    const lastFullEpisode = lastCompleteEpisodeNumber(aggregate);
+    if (lastFullEpisode === null) {
+      throw partialError(
+        `第 ${start}-${end} 集生成的内容里找不到完整的集数标记`,
+        aggregate
+      );
+    }
+    if (lastFullEpisode < start) {
+      throw partialError(
+        `第 ${start}-${end} 集没写出任何完整集（仅识别到第 ${lastFullEpisode} 集）`,
+        aggregate
+      );
+    }
+    if (truncated) {
+      // Drop the half-written trailing episode (cursor will rewrite it).
+      aggregate = trimToEpisode(aggregate, lastFullEpisode);
+      cursor = lastFullEpisode + 1;
+    } else {
+      cursor = lastFullEpisode + 1;
+    }
   }
-  return joinParts(parts);
+  return aggregate.trim();
 }
 
 async function generateStoryboardChunked(
@@ -414,36 +454,142 @@ async function generateStoryboardChunked(
   item: BatchItem,
   signal: AbortSignal | undefined
 ): Promise<string> {
-  const ranges = chunkRanges(project.totalEpisodes, EPISODES_PER_CHUNK);
-  const screenplaySlices = sliceScreenplayByEpisodes(item.screenplayMd, ranges);
-  const parts: string[] = [];
-  for (let i = 0; i < ranges.length; i += 1) {
-    const [start, end] = ranges[i];
-    if (signal?.aborted) {
-      throw partialError("已取消", joinParts(parts));
+  const total = project.totalEpisodes;
+  let cursor = 1;
+  let aggregate = "";
+  let iter = 0;
+  while (cursor <= total) {
+    if (signal?.aborted) throw partialError("已取消", aggregate);
+    if (iter >= MAX_CHUNK_ITERATIONS) {
+      throw partialError(
+        `批次迭代上限 ${MAX_CHUNK_ITERATIONS} 次后仍未写完分镜（已写到第 ${cursor - 1} 集）`,
+        aggregate
+      );
     }
-    const slice = screenplaySlices[i] || "";
-    if (!slice.trim()) continue;
-    const content = await runChunkWithRetry({
+    iter += 1;
+    const start = cursor;
+    const end = Math.min(total, start + EPISODES_PER_CHUNK - 1);
+    const slice = sliceScreenplayByEpisodes(item.screenplayMd, [[start, end]])[0] || "";
+    if (!slice.trim()) {
+      // No screenplay material for this range — skip and advance cursor.
+      cursor = end + 1;
+      continue;
+    }
+    const { content, truncated } = await runChunkWithRetry({
       label: `第 ${start}-${end} 集分镜`,
       buildMessages: () => buildStoryboardChunkMessages(project, item, slice, start, end),
       cfg,
       signal,
       temperature: 0.6,
-      partialSoFar: () => joinParts(parts),
+      partialSoFar: () => aggregate,
     });
-    parts.push(stripStraySummary(content));
+    const cleaned = stripStraySummary(content);
+    aggregate = aggregate ? `${aggregate}\n\n${cleaned}` : cleaned;
+    const lastFullEpisode = lastStoryboardEpisode(aggregate);
+    if (lastFullEpisode === null || lastFullEpisode < start) {
+      throw partialError(
+        `第 ${start}-${end} 集分镜没写出任何完整集`,
+        aggregate
+      );
+    }
+    if (truncated) {
+      aggregate = trimToStoryboardEpisode(aggregate, lastFullEpisode);
+    }
+    cursor = lastFullEpisode + 1;
   }
-  return joinParts(parts);
-}
-
-function joinParts(parts: string[]): string {
-  return parts.map((part) => part.trim()).filter(Boolean).join("\n\n");
+  return aggregate.trim();
 }
 
 function tail(text: string, chars: number): string {
   if (text.length <= chars) return text;
   return text.slice(-chars);
+}
+
+// Find the last episode number in the aggregate that has a "钩子：" line
+// after its `第 N 集` header (or is followed by another episode header).
+// This treats an episode as "complete" only when its hook block exists or
+// when the next episode has started — so a half-written final episode that
+// stopped mid-子场次 is correctly excluded.
+export function lastCompleteEpisodeNumber(aggregate: string): number | null {
+  const lines = aggregate.split(/\r?\n/);
+  let lastComplete: number | null = null;
+  let currentEp: number | null = null;
+  let currentEpHasHook = false;
+  for (const line of lines) {
+    const epHead = line.trim().match(/^第\s*(\d+)\s*集\s*$/);
+    if (epHead) {
+      // Closing the previous episode: it counts as complete only if it had
+      // a hook line, OR if a new episode header appeared right after it
+      // (which means the previous one finished).
+      if (currentEp !== null) lastComplete = currentEp;
+      currentEp = Number(epHead[1]);
+      currentEpHasHook = false;
+      continue;
+    }
+    if (currentEp !== null && /^钩子[:：]/.test(line.trim())) {
+      currentEpHasHook = true;
+    }
+  }
+  // Tail episode: complete only if the model wrote out its 钩子 block.
+  if (currentEp !== null && currentEpHasHook) lastComplete = currentEp;
+  return lastComplete;
+}
+
+export function trimToEpisode(aggregate: string, episode: number): string {
+  const lines = aggregate.split(/\r?\n/);
+  const out: string[] = [];
+  let seenEpisode = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^第\s*(\d+)\s*集\s*$/);
+    if (head) {
+      const n = Number(head[1]);
+      if (n > episode) break;
+      if (n === episode) seenEpisode = true;
+    }
+    out.push(line);
+  }
+  if (!seenEpisode) return aggregate.trim();
+  return out.join("\n").trim();
+}
+
+// For storyboard tables we look for "## 第 N 集分镜" markers. An episode is
+// counted as complete when its table body starts (i.e. at least one row) or
+// when the next episode header appears.
+export function lastStoryboardEpisode(aggregate: string): number | null {
+  const lines = aggregate.split(/\r?\n/);
+  let lastSeen: number | null = null;
+  let currentEp: number | null = null;
+  let currentEpHasRow = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^##\s*第\s*(\d+)\s*集分镜/);
+    if (head) {
+      if (currentEp !== null && currentEpHasRow) lastSeen = currentEp;
+      currentEp = Number(head[1]);
+      currentEpHasRow = false;
+      continue;
+    }
+    // A pipe-separated row that isn't the header/separator counts as a real shot.
+    if (currentEp !== null && /^\|\s*\d+\s*\|/.test(line)) currentEpHasRow = true;
+  }
+  if (currentEp !== null && currentEpHasRow) lastSeen = currentEp;
+  return lastSeen;
+}
+
+export function trimToStoryboardEpisode(aggregate: string, episode: number): string {
+  const lines = aggregate.split(/\r?\n/);
+  const out: string[] = [];
+  let seen = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^##\s*第\s*(\d+)\s*集分镜/);
+    if (head) {
+      const n = Number(head[1]);
+      if (n > episode) break;
+      if (n === episode) seen = true;
+    }
+    out.push(line);
+  }
+  if (!seen) return aggregate.trim();
+  return out.join("\n").trim();
 }
 
 // Strip trailing model self-talk like "本批次结束 / 待续 / continued..." so the
@@ -489,8 +635,19 @@ function sliceScreenplayByEpisodes(
 // attempt almost always succeeds because the relay re-establishes a fresh
 // connection. We retry up to MAX_CHUNK_ATTEMPTS times before bubbling
 // up as a partialError so the surrounding code can persist what's done.
+//
+// finishReason==="length" is NOT retried — the model deliberately filled
+// max_tokens, retrying would just truncate again at a different point. The
+// partial output is kept and the surrounding loop is expected to continue
+// from where it left off (see continueFrom logic in the screenplay/storyboard
+// chunk drivers).
 const MAX_CHUNK_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = 4000;
+
+interface ChunkResult {
+  content: string;
+  truncated: boolean; // true when finishReason === "length"
+}
 
 async function runChunkWithRetry(opts: {
   label: string;
@@ -499,17 +656,25 @@ async function runChunkWithRetry(opts: {
   signal: AbortSignal | undefined;
   temperature: number;
   partialSoFar: () => string;
-}): Promise<string> {
+}): Promise<ChunkResult> {
   let lastReason = "";
   for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt += 1) {
     if (opts.signal?.aborted) throw partialError("已取消", opts.partialSoFar());
     try {
-      const content = await collectLLM(opts.cfg, opts.buildMessages(), {
+      const { content, finishReason } = await collectLLM(opts.cfg, opts.buildMessages(), {
         temperature: opts.temperature,
         maxTokens: TOKEN_BUDGETS.longArtifact,
         signal: opts.signal,
       });
-      if (content.trim()) return content;
+      if (content.trim()) {
+        if (finishReason === "length") {
+          console.warn(
+            `[batch-chunk-truncated] ${opts.label} hit max_tokens; keeping partial and continuing from cliff`
+          );
+          return { content, truncated: true };
+        }
+        return { content, truncated: false };
+      }
       lastReason = "LLM 返回空内容（疑似上游空闲超时或风控）";
     } catch (err) {
       lastReason = err instanceof Error ? err.message : String(err);

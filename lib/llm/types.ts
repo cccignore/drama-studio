@@ -43,11 +43,17 @@ export interface LLMMessage {
   content: string;
 }
 
+export type LLMFinishReason = "stop" | "length" | "content_filter" | "tool_calls" | "unknown";
+
 export type LLMStreamEvent =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
-  | { type: "done"; usage?: { input?: number; output?: number } }
-  | { type: "error"; message: string };
+  | {
+      type: "done";
+      usage?: { input?: number; output?: number };
+      finishReason?: LLMFinishReason;
+    }
+  | { type: "error"; message: string; code?: "idle_timeout" | "stream_error" | "upstream_error" | "network_error" };
 
 export interface LLMCallOptions {
   temperature?: number;

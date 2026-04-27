@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { csvToItems, itemsToCsv } from "../lib/batch/csv";
 import { renderBatchMarkdown } from "../lib/batch/export";
 import { buildCreativeMessages, buildScreenplayMessages, buildStoryboardMessages, parseSourceDramas } from "../lib/batch/prompts";
-import { extractCreativeHead, parseCreativeStructured } from "../lib/batch/runner";
+import { extractCreativeHead, parseCreativeStructured, lastCompleteEpisodeNumber, trimToEpisode, lastStoryboardEpisode, trimToStoryboardEpisode } from "../lib/batch/runner";
 import { extractDetailUrls, parsePayamiDetail, scrapedSourcesToText } from "../lib/batch/scrape";
 import { closeDb } from "../lib/db/sqlite";
 import { createBatchProject, listBatchItems, upsertImportedItems } from "../lib/batch/store";
@@ -203,5 +203,77 @@ describe("batch factory", () => {
     expect(detail?.sourceKeywords).toContain("都市日常");
     expect(detail?.sourceKeywords).toContain("更新到第 30 集");
     expect(scrapedSourcesToText(detail ? [detail] : [])).toContain("假冒千金后，我成了豪门真团宠 |");
+  });
+});
+
+describe("chunked screenplay episode bookkeeping", () => {
+  const sample = [
+    "第 1 集",
+    "1-1",
+    "场景：A",
+    "人物：X",
+    "过程描写：",
+    "△something",
+    "X：hi",
+    "钩子：",
+    "悬念句。",
+    "",
+    "第 2 集",
+    "2-1",
+    "场景：B",
+    "人物：Y",
+    "过程描写：",
+    "△something",
+    "Y：hi",
+    "钩子：",
+    "悬念句。",
+    "",
+    "第 3 集",
+    "3-1",
+    "场景：half-written",
+    "人物：Z",
+    "过程描写：",
+    "△something",
+    // No 钩子: → episode 3 is incomplete (truncated mid-write).
+  ].join("\n");
+
+  it("treats only fully-hooked episodes as complete", () => {
+    expect(lastCompleteEpisodeNumber(sample)).toBe(2);
+  });
+
+  it("returns null when nothing is complete yet", () => {
+    expect(
+      lastCompleteEpisodeNumber("第 1 集\n1-1\n场景：A\n（writing in progress…）")
+    ).toBeNull();
+  });
+
+  it("trimToEpisode drops everything after the boundary", () => {
+    const trimmed = trimToEpisode(sample, 2);
+    expect(trimmed).toContain("第 1 集");
+    expect(trimmed).toContain("第 2 集");
+    expect(trimmed).not.toContain("第 3 集");
+    expect(trimmed).not.toContain("half-written");
+  });
+
+  it("storyboard helpers count rows and trim correctly", () => {
+    const sb = [
+      "## 第 1 集分镜（约 60s）",
+      "| 镜头号 | 逐秒分镜画面描述 | 中英双语台词 | 运镜方式/景别 | 人物图/场景图 | 备注 | 时长 |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| 1 | 0:00-0:04 ... | A：hi | 近景 | x | y | 4 |",
+      "",
+      "## 第 2 集分镜（约 62s）",
+      "| 镜头号 | 逐秒分镜画面描述 | 中英双语台词 | 运镜方式/景别 | 人物图/场景图 | 备注 | 时长 |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| 1 | 0:00-0:04 ... | A：hi | 近景 | x | y | 4 |",
+      "",
+      "## 第 3 集分镜（约 60s）",
+      // No row body — episode 3 is incomplete.
+    ].join("\n");
+    expect(lastStoryboardEpisode(sb)).toBe(2);
+    const trimmed = trimToStoryboardEpisode(sb, 2);
+    expect(trimmed).toContain("第 1 集分镜");
+    expect(trimmed).toContain("第 2 集分镜");
+    expect(trimmed).not.toContain("第 3 集分镜");
   });
 });

@@ -1,8 +1,32 @@
-import type { LLMConfig, LLMMessage, LLMStreamEvent, LLMCallOptions } from "../types";
+import type { LLMConfig, LLMMessage, LLMStreamEvent, LLMCallOptions, LLMFinishReason } from "../types";
 import { TOKEN_BUDGETS } from "../budgets";
 import { iterSSELines } from "../sse-parse";
 import { friendlyNetworkError, friendlyUpstreamError } from "../provider-error";
 import { fetchWithRetry } from "../retry";
+
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+
+function mapStopReason(raw: unknown): LLMFinishReason | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (raw === "end_turn" || raw === "stop_sequence") return "stop";
+  if (raw === "max_tokens") return "length";
+  if (raw === "tool_use") return "tool_calls";
+  return "unknown";
+}
+
+function composeSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
+  const valid = signals.filter((s): s is AbortSignal => Boolean(s));
+  if (valid.length === 1) return valid[0];
+  const controller = new AbortController();
+  for (const sig of valid) {
+    if (sig.aborted) {
+      controller.abort(sig.reason);
+      break;
+    }
+    sig.addEventListener("abort", () => controller.abort(sig.reason), { once: true });
+  }
+  return controller.signal;
+}
 
 /**
  * Anthropic-compatible /v1/messages streaming endpoint.
@@ -32,13 +56,24 @@ export async function* streamAnthropicCompat(
     messages: dialog,
   });
 
+  const idleAbort = new AbortController();
+  const composedSignal = composeSignals(opts.signal, idleAbort.signal);
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const armIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleAbort.abort(new Error("idle_timeout"));
+    }, STREAM_IDLE_TIMEOUT_MS);
+  };
+  armIdleTimer();
+
   let res: Response;
   try {
     res = await fetchWithRetry(
       url,
-      { method: "POST", headers, body, signal: opts.signal },
+      { method: "POST", headers, body, signal: composedSignal },
       {
-        signal: opts.signal,
+        signal: composedSignal,
         onRetry: ({ attempt, delayMs, reason }) => {
           console.warn(
             `[llm-retry] ${cfg.name} (${cfg.model}) attempt ${attempt} in ${delayMs}ms · ${reason}`
@@ -47,20 +82,28 @@ export async function* streamAnthropicCompat(
       }
     );
   } catch (err: unknown) {
+    if (idleTimer) clearTimeout(idleTimer);
     const msg = err instanceof Error ? err.message : String(err);
-    yield { type: "error", message: friendlyNetworkError(msg) };
+    if (idleAbort.signal.aborted) {
+      yield { type: "error", message: `流空闲超时（${STREAM_IDLE_TIMEOUT_MS / 1000}s 没有新 token）`, code: "idle_timeout" };
+      return;
+    }
+    yield { type: "error", message: friendlyNetworkError(msg), code: "network_error" };
     return;
   }
 
   if (!res.ok || !res.body) {
+    if (idleTimer) clearTimeout(idleTimer);
     const text = await res.text().catch(() => "");
-    yield { type: "error", message: friendlyUpstreamError(res.status, text) };
+    yield { type: "error", message: friendlyUpstreamError(res.status, text), code: "upstream_error" };
     return;
   }
 
   let usage: { input?: number; output?: number } | undefined;
+  let finishReason: LLMFinishReason | undefined;
   try {
     for await (const raw of iterSSELines(res.body)) {
+      armIdleTimer();
       let json: any;
       try {
         json = JSON.parse(raw);
@@ -70,24 +113,35 @@ export async function* streamAnthropicCompat(
       if (json.type === "content_block_delta") {
         const t = json?.delta?.text;
         if (t) yield { type: "delta", text: t };
-      } else if (json.type === "message_delta" && json.usage) {
-        usage = {
-          input: json.usage.input_tokens,
-          output: json.usage.output_tokens,
-        };
+      } else if (json.type === "message_delta") {
+        const fr = mapStopReason(json?.delta?.stop_reason);
+        if (fr) finishReason = fr;
+        if (json.usage) {
+          usage = {
+            input: json.usage.input_tokens,
+            output: json.usage.output_tokens,
+          };
+        }
       } else if (json.type === "message_stop") {
         break;
       } else if (json.type === "error") {
-        yield { type: "error", message: json?.error?.message ?? "上游 anthropic 错误" };
+        if (idleTimer) clearTimeout(idleTimer);
+        yield { type: "error", message: json?.error?.message ?? "上游 anthropic 错误", code: "upstream_error" };
         return;
       }
     }
   } catch (err: unknown) {
+    if (idleTimer) clearTimeout(idleTimer);
     const msg = err instanceof Error ? err.message : String(err);
-    yield { type: "error", message: `流式解析错误：${msg}` };
+    if (idleAbort.signal.aborted) {
+      yield { type: "error", message: `流空闲超时（${STREAM_IDLE_TIMEOUT_MS / 1000}s 没有新 token）`, code: "idle_timeout" };
+      return;
+    }
+    yield { type: "error", message: `流式解析错误：${msg}`, code: "stream_error" };
     return;
   }
-  yield { type: "done", usage };
+  if (idleTimer) clearTimeout(idleTimer);
+  yield { type: "done", usage, finishReason };
 }
 
 export async function pingAnthropicCompat(cfg: LLMConfig): Promise<{ ok: boolean; detail: string }> {
