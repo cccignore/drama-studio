@@ -22,6 +22,6 @@ services:
       DEFAULT_LLM_API_KEY: ${DEFAULT_LLM_API_KEY:-}
       FEISHU_APP_ID: ${FEISHU_APP_ID:-}
       FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
-      FEISHU_BITABLE_URL: ${FEISHU_BITABLE_URL:-}
+      FEISHU_FOLDER_TOKEN: ${FEISHU_FOLDER_TOKEN:-}
     volumes:
       - ./data:/app/.data

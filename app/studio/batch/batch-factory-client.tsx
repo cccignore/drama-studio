@@ -1161,24 +1161,16 @@ function FeishuExportButton({ id }: { id: string }) {
     if (busy) return;
     setBusy(true);
     try {
-      // Optional: let users override the destination per-batch via localStorage
-      // (set window.localStorage.feishuBitableUrl in DevTools). Falls back to
-      // the server-side FEISHU_BITABLE_URL env var.
-      const overrideUrl = typeof window !== "undefined" ? window.localStorage.getItem("feishuBitableUrl") : null;
-      const res = await fetch(`/api/batches/${id}/export/feishu`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(overrideUrl ? { bitableUrl: overrideUrl } : {}),
-      });
+      const res = await fetch(`/api/batches/${id}/export/feishu`, { method: "POST" });
       const data = (await res.json()) as
-        | { success: true; data: { bitableUrl: string; exported: number; skipped: Array<{ title: string; reason: string }> } }
+        | { success: true; data: { bitableUrl: string; bitableName: string; exported: number; skipped: Array<{ title: string; reason: string }> } }
         | { success: false; error: { code: string; message: string } };
       if (!data.success) throw new Error(data.error.message);
-      const { exported, skipped, bitableUrl } = data.data;
+      const { exported, skipped, bitableUrl, bitableName } = data.data;
       const skipNote = skipped.length ? `；跳过 ${skipped.length} 条（${skipped.map((s) => s.title).join("、")}）` : "";
-      toast.success(`已导出 ${exported} 条到飞书多维表格${skipNote}`, {
+      toast.success(`已新建多维表格「${bitableName}」并写入 ${exported} 条${skipNote}`, {
         action: { label: "打开", onClick: () => window.open(bitableUrl, "_blank") },
-        duration: 10000,
+        duration: 15000,
       });
     } catch (err) {
       toast.error((err as Error).message || "导出到飞书失败");

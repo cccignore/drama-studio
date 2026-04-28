@@ -105,6 +105,32 @@ export async function listFirstTableId(token: string, appToken: string): Promise
   return data.items[0].table_id;
 }
 
+// Create a brand-new bitable. folderToken is optional: if omitted, Feishu
+// drops the bitable into the app's default workspace, accessible via the URL
+// returned in the response (the user typically won't see it in their drive UI
+// without that link).
+export async function createBitable(
+  token: string,
+  name: string,
+  folderToken?: string
+): Promise<{ appToken: string; tableId: string; url: string }> {
+  const data = await api<{ app: { app_token: string; default_table_id: string; url: string } }>(
+    `/open-apis/bitable/v1/apps`,
+    {
+      method: "POST",
+      token,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, folder_token: folderToken ?? "" }),
+    },
+    (raw) => raw as { app: { app_token: string; default_table_id: string; url: string } }
+  );
+  return {
+    appToken: data.app.app_token,
+    tableId: data.app.default_table_id,
+    url: data.app.url,
+  };
+}
+
 export async function listFields(
   token: string,
   appToken: string,

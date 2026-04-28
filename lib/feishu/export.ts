@@ -2,11 +2,10 @@ import type { BatchItem, BatchProject } from "../batch/types";
 import { buildBatchArtifactDocx } from "../batch/feishu-docx";
 import {
   FeishuError,
+  createBitable,
   createRecord,
   ensureFields,
   getTenantAccessToken,
-  listFirstTableId,
-  parseBitableUrl,
   uploadMedia,
   type SchemaSpec,
 } from "./client";
@@ -47,13 +46,31 @@ function creativeBlock(item: BatchItem): string {
 export interface FeishuExportOptions {
   appId: string;
   appSecret: string;
-  bitableUrl: string;
+  // Optional folder where the new bitable should be created. If omitted the
+  // bitable lives in the app's default workspace and is reachable via the
+  // returned URL only.
+  folderToken?: string;
 }
 
 export interface FeishuExportResult {
   bitableUrl: string;
+  bitableName: string;
   exported: number;
   skipped: Array<{ title: string; reason: string }>;
+}
+
+function bitableNameFor(project: BatchProject): string {
+  // YYYY-MM-DD HH:mm in Asia/Shanghai. Avoid Intl quirks across server
+  // timezones by formatting manually from a UTC+8 offset.
+  const now = new Date(Date.now() + 8 * 60 * 60_000);
+  const y = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mi = String(now.getUTCMinutes()).padStart(2, "0");
+  const stamp = `${y}-${mm}-${dd} ${hh}:${mi}`;
+  const title = (project.title || "未命名批次").trim().slice(0, 40);
+  return `drama-studio · ${title} · ${stamp}`;
 }
 
 export async function exportBatchToFeishu(
@@ -61,10 +78,10 @@ export async function exportBatchToFeishu(
   items: BatchItem[],
   opts: FeishuExportOptions
 ): Promise<FeishuExportResult> {
-  const ref = parseBitableUrl(opts.bitableUrl);
   const token = await getTenantAccessToken(opts.appId, opts.appSecret);
-  const tableId = ref.tableId ?? (await listFirstTableId(token, ref.appToken));
-  await ensureFields(token, ref.appToken, tableId, SCHEMA);
+  const bitableName = bitableNameFor(project);
+  const { appToken, tableId, url: createdUrl } = await createBitable(token, bitableName, opts.folderToken);
+  await ensureFields(token, appToken, tableId, SCHEMA);
 
   const skipped: Array<{ title: string; reason: string }> = [];
   let exported = 0;
@@ -95,10 +112,10 @@ export async function exportBatchToFeishu(
         : null;
 
       const screenplayToken = screenplayBuf
-        ? await uploadMedia(token, ref.appToken, `${fileBase}-完整剧本.docx`, screenplayBuf)
+        ? await uploadMedia(token, appToken, `${fileBase}-完整剧本.docx`, screenplayBuf)
         : null;
       const storyboardToken = storyboardBuf
-        ? await uploadMedia(token, ref.appToken, `${fileBase}-分镜脚本.docx`, storyboardBuf)
+        ? await uploadMedia(token, appToken, `${fileBase}-分镜脚本.docx`, storyboardBuf)
         : null;
 
       const fields: Record<string, string | number | Array<{ file_token: string }>> = {
@@ -109,7 +126,7 @@ export async function exportBatchToFeishu(
       };
       if (screenplayToken) fields["完整剧本"] = [{ file_token: screenplayToken }];
       if (storyboardToken) fields["分镜脚本"] = [{ file_token: storyboardToken }];
-      await createRecord(token, ref.appToken, tableId, fields);
+      await createRecord(token, appToken, tableId, fields);
       exported += 1;
     } catch (err) {
       const message = err instanceof FeishuError ? `${err.code} · ${err.message}` : err instanceof Error ? err.message : String(err);
@@ -118,7 +135,8 @@ export async function exportBatchToFeishu(
   }
 
   return {
-    bitableUrl: ref.tableId ? opts.bitableUrl : `${opts.bitableUrl}${opts.bitableUrl.includes("?") ? "&" : "?"}table=${tableId}`,
+    bitableUrl: `${createdUrl}?table=${tableId}`,
+    bitableName,
     exported,
     skipped,
   };
