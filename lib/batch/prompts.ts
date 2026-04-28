@@ -528,12 +528,23 @@ export function buildScreenplayChunkMessages(
         "- 「过程描写」内部按拍摄顺序逐行输出：动作行（△ 开头）与台词行交错排布，不要全部 △ 堆在前面再堆台词。",
         "- 台词行格式：`<角色>（情绪）：<台词>` 或 `<角色>：<台词>`，每行一句。",
       ];
+  const charactersBlock = item.charactersMd?.trim()
+    ? ["", "【人物表（必须严格使用以下姓名、身份、关系；不得新增主要人物或改名）】", item.charactersMd.trim()].join("\n")
+    : "";
+  const outlineSlice = sliceOutlineByEpisodes(item.outlineMd, startEp, endEp);
+  const outlineBlock = outlineSlice
+    ? [
+        "",
+        `【分集大纲（仅本批次第 ${startEp}-${endEp} 集，剧本必须严格按这里的核心冲突 + 钩子展开）】`,
+        outlineSlice,
+      ].join("\n")
+    : "";
   return [
     {
       role: "system",
       content: overseas
-        ? "你是 Drama Studio 红果批量工厂里的专业海外短剧 Writer。请严格按 docx 交付格式输出剧本：每集若干个 N-M 子场次，每个子场次必须包含「场景 / 人物 / 过程描写」三个 label，过程描写内部把动作（△）与台词逐行交错。台词必须双语：先英文后中文，二者皆用中文圆角双引号 “...”。本集最后一个子场次必须额外加「钩子」。语言克制、台词短狠，每场至少发生一次局势变化。"
-        : "你是 Drama Studio 红果批量工厂里的专业短剧 Writer。请严格按 docx 交付格式输出剧本：每集若干个 N-M 子场次，每个子场次必须包含「场景 / 人物 / 过程描写」三个 label，过程描写内部把动作（△）与台词逐行交错。本集最后一个子场次必须额外加「钩子」。语言克制、台词短狠，每场至少发生一次局势变化（信息释放/情绪转折/权力转移/关系变化/威胁升级/决策形成/谎言暴露）。",
+        ? "你是 Drama Studio 红果批量工厂里的专业海外短剧 Writer。请严格按 docx 交付格式输出剧本：每集若干个 N-M 子场次，每个子场次必须包含「场景 / 人物 / 过程描写」三个 label，过程描写内部把动作（△）与台词逐行交错。台词必须双语：先英文后中文，二者皆用中文圆角双引号 “...”。本集最后一个子场次必须额外加「钩子」。语言克制、台词短狠，每场至少发生一次局势变化。**人物姓名必须严格使用 user 消息【人物表】中给定的姓名，禁止改名或新增主要人物。**"
+        : "你是 Drama Studio 红果批量工厂里的专业短剧 Writer。请严格按 docx 交付格式输出剧本：每集若干个 N-M 子场次，每个子场次必须包含「场景 / 人物 / 过程描写」三个 label，过程描写内部把动作（△）与台词逐行交错。本集最后一个子场次必须额外加「钩子」。语言克制、台词短狠，每场至少发生一次局势变化（信息释放/情绪转折/权力转移/关系变化/威胁升级/决策形成/谎言暴露）。**人物姓名必须严格使用 user 消息【人物表】中给定的姓名，禁止改名或新增主要人物。**",
     },
     {
       role: "user",
@@ -548,6 +559,8 @@ export function buildScreenplayChunkMessages(
         "",
         "【三幕创意】",
         creativeBlock,
+        charactersBlock,
+        outlineBlock,
         continuityBlock,
         "【输出格式：严格按以下结构，禁止任何额外 Markdown 标题或编号】",
         `第 ${startEp} 集`,
@@ -569,6 +582,12 @@ export function buildScreenplayChunkMessages(
         `- 只输出第 ${startEp} 集到第 ${endEp} 集，**严禁**写第 ${startEp - 1} 集（如有）或第 ${endEp + 1} 集及之后内容。`,
         "- 必须从第 " + startEp + " 集开始连续写到第 " + endEp + " 集，每一集都要有，不能跳号也不能停在中间。",
         "- 每集 3-6 个子场次，子场次编号必须为「集号-序号」（如 " + startEp + "-1, " + startEp + "-2），不能用「第 X 场」或其他形式。",
+        item.charactersMd?.trim()
+          ? "- 角色姓名必须与【人物表】完全一致；如果该集没有列出的次要人物登场，可创建路人但不能给路人分配主线戏份。"
+          : "",
+        outlineSlice
+          ? "- 每一集必须命中【分集大纲】里这一集对应行的『核心冲突 + 钩子』；不允许偏离大纲安排剧情或自创新主线。"
+          : "",
         ...formatRules,
         "- 「钩子：」只在每集最后一个子场次后面出现一次，是本集收束悬念。",
         isFirstChunk
@@ -602,6 +621,31 @@ function renderCreativeBlockForPrompt(item: BatchItem): string {
     .join("\n");
   if (structured) return structured;
   return item.creativeMd || item.oneLiner || item.sourceText || item.title || "";
+}
+
+// Cut a `第 N 集：……` / `钩子：……` style outline down to just the rows that
+// match [startEp, endEp]. Used to keep the screenplay chunk prompt focused on
+// the slice it's actually writing — feeding all 30 episodes of outline every
+// chunk both wastes tokens and tempts the model to "re-establish" earlier
+// episodes inside the current chunk.
+//
+// Tolerant of either CJK colon (：) or ASCII colon (:) and of `第 N 集` with
+// or without a bullet. Falls back to returning "" if the outline isn't
+// shaped this way (e.g. legacy items without an outline_md column).
+export function sliceOutlineByEpisodes(outline: string, startEp: number, endEp: number): string {
+  if (!outline?.trim()) return "";
+  const lines = outline.split(/\r?\n/);
+  const out: string[] = [];
+  let keeping = false;
+  for (const line of lines) {
+    const head = line.trim().match(/^第\s*(\d+)\s*集[:：]/);
+    if (head) {
+      const n = Number(head[1]);
+      keeping = n >= startEp && n <= endEp;
+    }
+    if (keeping) out.push(line);
+  }
+  return out.join("\n").trim();
 }
 
 export function buildStoryboardMessages(project: BatchProject, item: BatchItem): LLMMessage[] {
