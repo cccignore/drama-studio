@@ -7,6 +7,8 @@ import {
   buildDistillMessages,
   buildScreenplayChunkMessages,
   buildStoryboardChunkMessages,
+  buildSynopsisMessages,
+  splitSynopsis,
 } from "./prompts";
 import {
   getBatchProject,
@@ -85,6 +87,19 @@ export async function runBatchStage(input: {
           status: "creative_ready",
           error: "",
         });
+      } else if (input.stage === "synopsis") {
+        const { content } = await collectLLM(cfg, buildSynopsisMessages(project, item), {
+          temperature: 0.55,
+          maxTokens: TOKEN_BUDGETS.longArtifact,
+          signal: input.signal,
+        });
+        const { charactersMd, outlineMd } = splitSynopsis(content);
+        updateBatchItem(item.id, {
+          charactersMd,
+          outlineMd,
+          status: "synopsis_ready",
+          error: "",
+        });
       } else if (input.stage === "screenplay") {
         const screenplay = await generateScreenplayChunked(cfg, project, item, input.signal);
         updateBatchItem(item.id, {
@@ -126,6 +141,14 @@ export async function runBatchStage(input: {
 function resolveConfigForBatchStage(stage: BatchStage): LLMConfig | null {
   if (stage === "screenplay") return resolveConfigForCommand("episode");
   if (stage === "storyboard") return resolveConfigForCommand("episode");
+  if (stage === "synopsis") {
+    return (
+      resolveConfigForCommand("characters") ??
+      resolveConfigForCommand("outline") ??
+      resolveConfigForCommand("creative") ??
+      resolveConfigForCommand("start")
+    );
+  }
   // distill + creative both fall back to the start/creative slot.
   return resolveConfigForCommand("creative") ?? resolveConfigForCommand("start");
 }
@@ -173,6 +196,14 @@ function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: bool
         (item.oneLiner || item.sourceText) &&
         ((!item.creativeMd && !item.act1) || isResumable(item.status, "creative_running")) &&
         (!selectedOnly || item.ideaSelected)
+    );
+  }
+  if (stage === "synopsis") {
+    return items.filter(
+      (item) =>
+        (item.creativeMd || item.act1) &&
+        (!item.outlineMd || isResumable(item.status, "synopsis_running")) &&
+        (!selectedOnly || item.creativeSelected)
     );
   }
   if (stage === "screenplay") {

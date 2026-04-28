@@ -17,8 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 
 type Market = "domestic" | "overseas";
-type Stage = "distill" | "creative" | "screenplay" | "storyboard";
-type WorkflowStep = "sources" | Stage;
+type Stage = "distill" | "creative" | "synopsis" | "screenplay" | "storyboard";
+type WorkflowStep = "sources" | Exclude<Stage, "synopsis">;
 type ExportStage = WorkflowStep;
 type ScrapeSource = "latest" | "rank";
 type SourceMode = "hongguo" | "manual";
@@ -52,6 +52,8 @@ interface BatchItem {
   act2: string;
   act3: string;
   creativeMd: string;
+  charactersMd: string;
+  outlineMd: string;
   screenplayMd: string;
   storyboardMd: string;
   ideaSelected: boolean;
@@ -156,7 +158,7 @@ export function BatchFactoryClient() {
   // in a `*_running` state (the run finished while the page was open).
   React.useEffect(() => {
     if (!active) return;
-    const stages: Stage[] = ["distill", "creative", "screenplay", "storyboard"];
+    const stages: Stage[] = ["distill", "creative", "synopsis", "screenplay", "storyboard"];
     const stageWithRunning = stages.find((stage) =>
       items.some((item) => item.status === `${stage}_running`)
     );
@@ -764,7 +766,7 @@ function GenerationStep({
   onDelete,
   onRefresh,
 }: {
-  step: Stage;
+  step: Exclude<Stage, "synopsis">;
   title: string;
   description: string;
   active: BatchProject;
@@ -1163,14 +1165,33 @@ function FeishuExportButton({ id }: { id: string }) {
     try {
       const res = await fetch(`/api/batches/${id}/export/feishu`, { method: "POST" });
       const data = (await res.json()) as
-        | { success: true; data: { bitableUrl: string; bitableName: string; exported: number; skipped: Array<{ title: string; reason: string }> } }
+        | {
+            success: true;
+            data: {
+              bitableUrl: string;
+              bitableName: string;
+              exported: number;
+              skipped: Array<{ title: string; reason: string }>;
+              publicPermission: { applied: string | null; attempts: Array<{ entity: string; ok: boolean; message?: string }> };
+            };
+          }
         | { success: false; error: { code: string; message: string } };
       if (!data.success) throw new Error(data.error.message);
-      const { exported, skipped, bitableUrl, bitableName } = data.data;
+      const { exported, skipped, bitableUrl, bitableName, publicPermission } = data.data;
       const skipNote = skipped.length ? `；跳过 ${skipped.length} 条（${skipped.map((s) => s.title).join("、")}）` : "";
-      toast.success(`已新建多维表格「${bitableName}」并写入 ${exported} 条${skipNote}`, {
+      const permNote =
+        publicPermission.applied === "anyone_editable"
+          ? "（任何人可编辑）"
+          : publicPermission.applied === "anyone_readable"
+            ? "（任何人可查看，但本租户外的人无法编辑——管理员限制了外部编辑）"
+            : publicPermission.applied === "tenant_editable"
+              ? "（仅本租户成员可编辑——管理员关闭了外部分享）"
+              : publicPermission.applied === "tenant_readable"
+                ? "（仅本租户成员可查看——管理员关闭了外部分享）"
+                : "（公开权限未能写入，请手动到飞书检查分享设置）";
+      toast.success(`已新建多维表格「${bitableName}」并写入 ${exported} 条${skipNote}${permNote}`, {
         action: { label: "打开", onClick: () => window.open(bitableUrl, "_blank") },
-        duration: 15000,
+        duration: 20000,
       });
     } catch (err) {
       toast.error((err as Error).message || "导出到飞书失败");
@@ -1326,7 +1347,13 @@ function filterItemsForStep(items: BatchItem[], _step: WorkflowStep): BatchItem[
 }
 
 function isRunStage(value: BusyState | null): value is Stage {
-  return value === "distill" || value === "creative" || value === "screenplay" || value === "storyboard";
+  return (
+    value === "distill" ||
+    value === "creative" ||
+    value === "synopsis" ||
+    value === "screenplay" ||
+    value === "storyboard"
+  );
 }
 
 function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
@@ -1348,6 +1375,15 @@ function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
         (item) =>
           (item.oneLiner || item.sourceText) &&
           ((!item.creativeMd && !item.act1) || isResumable(item, "creative_running"))
+      )
+      .map((item) => item.id);
+  }
+  if (stage === "synopsis") {
+    return items
+      .filter(
+        (item) =>
+          (item.creativeMd || item.act1) &&
+          (!item.outlineMd || isResumable(item, "synopsis_running"))
       )
       .map((item) => item.id);
   }
@@ -1375,9 +1411,11 @@ function stageStats(info: RunInfo, items: BatchItem[]) {
     done: rows.filter((item) =>
       info.stage === "creative"
         ? Boolean(item.creativeMd)
-        : info.stage === "screenplay"
-          ? Boolean(item.screenplayMd)
-          : Boolean(item.storyboardMd)
+        : info.stage === "synopsis"
+          ? Boolean(item.outlineMd)
+          : info.stage === "screenplay"
+            ? Boolean(item.screenplayMd)
+            : Boolean(item.storyboardMd)
     ).length,
   };
 }
@@ -1385,6 +1423,7 @@ function stageStats(info: RunInfo, items: BatchItem[]) {
 function stageLabel(stage: Stage): string {
   if (stage === "distill") return "批量提炼一句话";
   if (stage === "creative") return "批量生成三幕创意";
+  if (stage === "synopsis") return "批量生成人物小传与分集大纲";
   if (stage === "screenplay") return "批量生成完整剧本";
   return "批量生成分镜脚本";
 }
@@ -1392,6 +1431,7 @@ function stageLabel(stage: Stage): string {
 function stageTableTitle(stage: Stage): string {
   if (stage === "distill") return "一句话候选";
   if (stage === "creative") return "三幕创意候选";
+  if (stage === "synopsis") return "人物小传与分集大纲候选";
   if (stage === "screenplay") return "完整剧本候选";
   return "分镜脚本候选";
 }

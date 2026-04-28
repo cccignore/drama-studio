@@ -1,5 +1,5 @@
 export type BatchMarket = "domestic" | "overseas";
-export type BatchStage = "sources" | "distill" | "creative" | "screenplay" | "storyboard";
+export type BatchStage = "sources" | "distill" | "creative" | "synopsis" | "screenplay" | "storyboard";
 export type BatchReviewStage = "sources" | "creative" | "screenplay";
 export type BatchItemStatus =
   | "source_ready"
@@ -7,6 +7,8 @@ export type BatchItemStatus =
   | "distill_ready"
   | "creative_running"
   | "creative_ready"
+  | "synopsis_running"
+  | "synopsis_ready"
   | "screenplay_running"
   | "screenplay_ready"
   | "storyboard_running"
@@ -46,6 +48,8 @@ export interface BatchItem {
   visualTone: string;
   coreTheme: string;
   creativeMd: string;
+  charactersMd: string;
+  outlineMd: string;
   screenplayMd: string;
   storyboardMd: string;
   ideaSelected: boolean;

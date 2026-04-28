@@ -345,6 +345,123 @@ export function buildScreenplayMessages(project: BatchProject, item: BatchItem):
   return buildScreenplayChunkMessages(project, item, 1, project.totalEpisodes, "");
 }
 
+// ---------------------------------------------------------------------------
+// Synopsis stage —— 在 creative 之后、screenplay 之前生成两块产物：
+//   1) 人物小传（5-8 个主要人物，每人 80-150 字）
+//   2) 分集大纲（共 totalEpisodes 集，每集 60-100 字 + 钩子）
+// 输出一个 markdown 文本，强制使用两个二级标题作为分隔锚点：
+//   ## 人物小传
+//   ## 分集大纲
+// 解析器只检查这两个锚点，剩下的文本自由组织（人物用三级标题、大纲用「第 N
+// 集：…… / 钩子：……」格式），保证模型有空间发挥但下游能稳定切片。
+// ---------------------------------------------------------------------------
+export function buildSynopsisMessages(project: BatchProject, item: BatchItem): LLMMessage[] {
+  const overseas = project.targetMarket === "overseas";
+  const creativeBlock = renderCreativeBlockForPrompt(item);
+  const total = project.totalEpisodes;
+  const sampleName = overseas ? "Lucas Reed" : "林夏";
+
+  return [
+    {
+      role: "system",
+      content:
+        "你是 Drama Studio 红果批量工厂里的资深短剧策划。给定一个三幕创意，你需要在不展开为完整剧本的前提下，"
+        + "输出两块产物：① 人物小传（让选角/编剧/美术能立刻理解每个主要人物的差异）；"
+        + "② 分集大纲（把三幕展开成精确到每集的故事线索，让 Writer 可以照着写完整剧本）。"
+        + "严格按 user 消息中的二级标题模板输出，不要写前言、不要复述创意、不要在末尾加总结。",
+    },
+    {
+      role: "user",
+      content: [
+        `【目标市场】${marketLabel(project.targetMarket)}`,
+        marketRules(project.targetMarket),
+        `【总集数】${total}`,
+        "",
+        "【三幕创意】",
+        creativeBlock,
+        "",
+        "【输出格式 —— 严格使用以下两个二级标题，缺一不可，禁止额外的一级标题或前后说明】",
+        "",
+        "## 人物小传",
+        "",
+        `### ${sampleName}`,
+        "- 身份：<一句话身份+阶层>",
+        "- 性格：<3-5 个关键词或短句>",
+        "- 背景：<1-2 句过去经历，影响主线行为的核心创伤/秘密/野心>",
+        "- 与主角的关系：<对位/盟友/反派/暗线，第一主角自己这一段写「主角自身」>",
+        "- 关键弧光：<这部戏里他/她从什么状态走到什么状态>",
+        "",
+        "（重复以上结构，输出 5-8 位主要人物：第一主角、第二主角/恋人、主反派、关键盟友、关键家人/旧相识、可选的第二反派/真相揭露者。每位 80-150 字。）",
+        "",
+        "## 分集大纲",
+        "",
+        "第 1 集：<这一集的核心冲突 + 关键事件 60-100 字。必须命中『当集要发生什么』，不要复述创意。>",
+        "钩子：<1 句话，过渡到下一集的悬念>",
+        "",
+        "第 2 集：<同上>",
+        "钩子：<同上>",
+        "",
+        `（一直写到第 ${total} 集；每集都必须有「第 N 集：……」一行 + 「钩子：……」一行；最后一集的钩子用作终章余韵。）`,
+        "",
+        "【硬性标准】",
+        "- 人物小传至少 5 位、最多 8 位；不能只写主角一人。",
+        `- 分集大纲必须从第 1 集连续写到第 ${total} 集，集号不能跳、不能合并（不允许「第 5-7 集」这种合并写法）。`,
+        "- 每集大纲必须有「钩子：」一行；最后一集（第 " + total + " 集）的钩子是终章余韵，不是新悬念。",
+        "- 不要在大纲里写完整对白、不要写镜头号、不要写场号——这些留给后面的剧本与分镜阶段。",
+        "- 三幕的覆盖比例参考：Act 1 占前 25-30%；Act 2 占中段 50% 左右；Act 3 占最后 20-25%。",
+        overseas
+          ? "- 海外向：人名/地名全部用纯英文，**严禁**任何亚裔元素和中文/拼音名。其余文本仍用中文便于中文审核。"
+          : "- 国内向：人名地名全部中文，使用国内短剧表达。",
+      ].join("\n"),
+    },
+  ];
+}
+
+// 把 synopsis 阶段返回的 markdown 拆成 charactersMd / outlineMd 两段。
+// 锚点固定为「## 人物小传」/「## 分集大纲」，缺失任意一个时把整个 raw 当作
+// 对应字段保留，避免内容被丢弃。
+export function splitSynopsis(raw: string): { charactersMd: string; outlineMd: string } {
+  const text = (raw || "").trim();
+  if (!text) return { charactersMd: "", outlineMd: "" };
+  const charIdx = text.search(/^##\s*人物小传\s*$/m);
+  const outIdx = text.search(/^##\s*分集大纲\s*$/m);
+  // Both anchors found in normal order — split cleanly.
+  if (charIdx >= 0 && outIdx > charIdx) {
+    const charBody = text.slice(charIdx).split(/^##\s*分集大纲\s*$/m)[0] ?? "";
+    const outBody = text.slice(outIdx);
+    return {
+      charactersMd: stripHeading(charBody, "人物小传"),
+      outlineMd: stripHeading(outBody, "分集大纲"),
+    };
+  }
+  // Reversed order — outline first, characters second. Rare but tolerate.
+  if (outIdx >= 0 && charIdx > outIdx) {
+    const outBody = text.slice(outIdx).split(/^##\s*人物小传\s*$/m)[0] ?? "";
+    const charBody = text.slice(charIdx);
+    return {
+      charactersMd: stripHeading(charBody, "人物小传"),
+      outlineMd: stripHeading(outBody, "分集大纲"),
+    };
+  }
+  // Only one anchor present — assign the whole content to that side.
+  if (charIdx >= 0) return { charactersMd: stripHeading(text.slice(charIdx), "人物小传"), outlineMd: "" };
+  if (outIdx >= 0) return { charactersMd: "", outlineMd: stripHeading(text.slice(outIdx), "分集大纲") };
+  // No anchors — fall back to splitting on the first `第 1 集：` so a
+  // mis-formatted response still produces some outline content.
+  const epIdx = text.search(/^第\s*1\s*集[:：]/m);
+  if (epIdx > 0) {
+    return {
+      charactersMd: text.slice(0, epIdx).trim(),
+      outlineMd: text.slice(epIdx).trim(),
+    };
+  }
+  return { charactersMd: text, outlineMd: "" };
+}
+
+function stripHeading(block: string, heading: string): string {
+  return block.replace(new RegExp(`^##\\s*${heading}\\s*$`, "m"), "").trim();
+}
+
 /**
  * Build prompts for a screenplay slice covering [startEp, endEp] only.
  * `previousTail` is the trailing portion of already-generated screenplay text

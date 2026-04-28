@@ -45,6 +45,8 @@ function item(patch: Partial<BatchItem> = {}): BatchItem {
     visualTone: "",
     coreTheme: "",
     creativeMd: "## Act 1\nFake marriage begins.",
+    charactersMd: "",
+    outlineMd: "",
     screenplayMd: "# 第 1 集\n剧本正文",
     storyboardMd: "# 第 1 集分镜\n#001 WS",
     ideaSelected: true,

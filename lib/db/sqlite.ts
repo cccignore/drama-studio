@@ -87,6 +87,8 @@ function runMigrations(db: Database.Database) {
       visual_tone           TEXT,
       core_theme            TEXT,
       creative_md           TEXT,
+      characters_md         TEXT,
+      outline_md            TEXT,
       screenplay_md         TEXT,
       storyboard_md         TEXT,
       idea_selected         INTEGER NOT NULL DEFAULT 1,
@@ -128,6 +130,8 @@ function runMigrations(db: Database.Database) {
     "worldview",
     "visual_tone",
     "core_theme",
+    "characters_md",
+    "outline_md",
   ]) {
     if (!hasBatchColumn(col)) {
       db.exec(`ALTER TABLE batch_items ADD COLUMN ${col} TEXT`);

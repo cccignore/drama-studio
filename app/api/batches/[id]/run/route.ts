@@ -15,19 +15,19 @@ export const maxDuration = 3600;
 
 // Two ways to call:
 //   - { stage: "creative" }                         single stage
-//   - { chain: true }                               creative → screenplay → storyboard
+//   - { chain: true }                               creative → synopsis → screenplay → storyboard
 //   - { chain: true, fromStage: "screenplay" }      screenplay → storyboard
 const RunSchema = z
   .object({
-    stage: z.enum(["distill", "creative", "screenplay", "storyboard"]).optional(),
+    stage: z.enum(["distill", "creative", "synopsis", "screenplay", "storyboard"]).optional(),
     chain: z.boolean().optional(),
-    fromStage: z.enum(["creative", "screenplay", "storyboard"]).optional(),
+    fromStage: z.enum(["creative", "synopsis", "screenplay", "storyboard"]).optional(),
     batchSize: z.number().int().min(1).max(100).optional(),
     selectedOnly: z.boolean().optional(),
   })
   .refine((d) => d.stage || d.chain, { message: "stage 或 chain 必须传一个" });
 
-const CHAIN_FULL: BatchStage[] = ["creative", "screenplay", "storyboard"];
+const CHAIN_FULL: BatchStage[] = ["creative", "synopsis", "screenplay", "storyboard"];
 
 // We don't await the run here. The runner gets handed off to a process-scope
 // supervisor and the API returns immediately with `started` or
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const { id } = await params;
     const url = new URL(request.url);
-    const stage = url.searchParams.get("stage") as "distill" | "creative" | "screenplay" | "storyboard" | null;
+    const stage = url.searchParams.get("stage") as "distill" | "creative" | "synopsis" | "screenplay" | "storyboard" | null;
     if (!stage) throw new AppError("invalid_input", "缺少 stage 参数", 400);
     return ok({ run: getRunState(id, stage) });
   } catch (err) {

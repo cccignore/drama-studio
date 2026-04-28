@@ -36,6 +36,8 @@ interface BatchItemRow {
   visual_tone: string | null;
   core_theme: string | null;
   creative_md: string | null;
+  characters_md: string | null;
+  outline_md: string | null;
   screenplay_md: string | null;
   storyboard_md: string | null;
   idea_selected: number;
@@ -84,6 +86,8 @@ function rowToItem(row: BatchItemRow): BatchItem {
     visualTone: row.visual_tone ?? "",
     coreTheme: row.core_theme ?? "",
     creativeMd: row.creative_md ?? "",
+    charactersMd: row.characters_md ?? "",
+    outlineMd: row.outline_md ?? "",
     screenplayMd: row.screenplay_md ?? "",
     storyboardMd: row.storyboard_md ?? "",
     ideaSelected: row.idea_selected === 1,
@@ -286,9 +290,9 @@ export function upsertImportedItems(
            (id, batch_id, source_title, source_keywords, source_summary, source_text, title, one_liner,
             protagonist, narrative_pov, audience, story_type, setting_text, act1, act2, act3,
             worldview, visual_tone, core_theme,
-            creative_md, screenplay_md, storyboard_md,
+            creative_md, characters_md, outline_md, screenplay_md, storyboard_md,
             idea_selected, creative_selected, screenplay_selected, status, error, meta_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -311,6 +315,8 @@ export function upsertImportedItems(
           row.visualTone ?? "",
           row.coreTheme ?? "",
           row.creativeMd ?? "",
+          row.charactersMd ?? "",
+          row.outlineMd ?? "",
           row.screenplayMd ?? "",
           row.storyboardMd ?? "",
           row.ideaSelected === false ? 0 : 1,
@@ -392,7 +398,7 @@ export function updateBatchItem(id: string, patch: Partial<BatchItem>): BatchIte
        SET source_title = ?, source_keywords = ?, source_summary = ?, source_text = ?, title = ?, one_liner = ?,
            protagonist = ?, narrative_pov = ?, audience = ?, story_type = ?, setting_text = ?, act1 = ?, act2 = ?, act3 = ?,
            worldview = ?, visual_tone = ?, core_theme = ?,
-           creative_md = ?, screenplay_md = ?, storyboard_md = ?,
+           creative_md = ?, characters_md = ?, outline_md = ?, screenplay_md = ?, storyboard_md = ?,
            idea_selected = ?, creative_selected = ?, screenplay_selected = ?, status = ?, error = ?, meta_json = ?,
            updated_at = ?
        WHERE id = ?`
@@ -416,6 +422,8 @@ export function updateBatchItem(id: string, patch: Partial<BatchItem>): BatchIte
       next.visualTone,
       next.coreTheme,
       next.creativeMd,
+      next.charactersMd,
+      next.outlineMd,
       next.screenplayMd,
       next.storyboardMd,
       next.ideaSelected ? 1 : 0,

@@ -344,3 +344,91 @@ export async function deleteAllRecords(token: string, appToken: string, tableId:
   );
   return ids.length;
 }
+
+// Try to flip a freshly-created Bitable to "anyone with the link can edit",
+// using drive/v2 public permission API. The endpoint is best-effort: tenant
+// admins may have disabled external sharing, in which case we walk down a
+// fallback ladder until something sticks. Returns the entity that ended up
+// applied so the caller can warn the user (e.g. "external sharing is locked
+// down at tenant level — only your tenant members can open the link").
+//
+// Why not just call once with the strongest setting: when external_access is
+// disabled by admin policy, drive/v2 returns code 1061045 / 1061049 / etc and
+// the entire PATCH is rejected — including the parts that *would* have
+// succeeded. We need to retry with a weaker setting to give the user the most
+// permissive link the tenant allows.
+//
+// Order:
+//   1. anyone_editable + external_access open      (anyone can edit & share)
+//   2. anyone_readable + external_access open      (anyone can view & share)
+//   3. tenant_editable                              (tenant members can edit)
+//   4. tenant_readable                              (tenant members can view)
+//   5. give up — return null; the caller surfaces a hint.
+//
+// Docs: https://open.feishu.cn/document/server-docs/docs/permission/permission-public/patch-2
+type PublicShareEntity =
+  | "anyone_editable"
+  | "anyone_readable"
+  | "tenant_editable"
+  | "tenant_readable";
+
+const PUBLIC_FALLBACK_LADDER: Array<{
+  link_share_entity: PublicShareEntity;
+  external_access_entity: "open" | "closed";
+  share_entity?: "anyone" | "same_tenant";
+  comment_entity?: "anyone_can_view" | "anyone_can_edit" | "collaborator_can_view" | "collaborator_can_edit";
+}> = [
+  {
+    link_share_entity: "anyone_editable",
+    external_access_entity: "open",
+    share_entity: "anyone",
+    comment_entity: "anyone_can_edit",
+  },
+  {
+    link_share_entity: "anyone_readable",
+    external_access_entity: "open",
+    share_entity: "anyone",
+    comment_entity: "anyone_can_view",
+  },
+  {
+    link_share_entity: "tenant_editable",
+    external_access_entity: "closed",
+    share_entity: "same_tenant",
+  },
+  {
+    link_share_entity: "tenant_readable",
+    external_access_entity: "closed",
+    share_entity: "same_tenant",
+  },
+];
+
+export interface PublicPermissionResult {
+  applied: PublicShareEntity | null;
+  attempts: Array<{ entity: PublicShareEntity; ok: boolean; message?: string }>;
+}
+
+export async function setBitablePublicPermission(
+  token: string,
+  appToken: string
+): Promise<PublicPermissionResult> {
+  const attempts: PublicPermissionResult["attempts"] = [];
+  for (const setting of PUBLIC_FALLBACK_LADDER) {
+    try {
+      await api<unknown>(
+        `/open-apis/drive/v2/permissions/${appToken}/public?type=bitable`,
+        {
+          method: "PATCH",
+          token,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(setting),
+        }
+      );
+      attempts.push({ entity: setting.link_share_entity, ok: true });
+      return { applied: setting.link_share_entity, attempts };
+    } catch (err) {
+      const message = err instanceof FeishuError ? `${err.code} · ${err.message}` : err instanceof Error ? err.message : String(err);
+      attempts.push({ entity: setting.link_share_entity, ok: false, message });
+    }
+  }
+  return { applied: null, attempts };
+}
