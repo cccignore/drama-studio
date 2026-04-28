@@ -17,10 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 
 type Market = "domestic" | "overseas";
-type Stage = "creative" | "screenplay" | "storyboard";
+type Stage = "distill" | "creative" | "screenplay" | "storyboard";
 type WorkflowStep = "sources" | Stage;
 type ExportStage = WorkflowStep;
 type ScrapeSource = "latest" | "rank";
+type SourceMode = "hongguo" | "manual";
 type BusyState = Stage | "create" | "import" | "scrape";
 
 interface BatchProject {
@@ -74,10 +75,11 @@ interface RunInfo {
 }
 
 const STEPS: Array<{ key: WorkflowStep; title: string; note: string }> = [
-  { key: "sources", title: "1. 源剧池", note: "抓取/粘贴红果源剧，删除不要的行后进入下一步。" },
-  { key: "creative", title: "2. 三幕创意", note: "结构化输出：剧名/第一主角/视角/受众/类型/背景/Act1-3。" },
-  { key: "screenplay", title: "3. 完整剧本", note: "按 docx 格式输出第N集 + N-M 子场次（场景/人物/画面/台词/钩子）。" },
-  { key: "storyboard", title: "4. 分镜脚本", note: "逐场拆镜：镜号、景别、机位、画面、台词/SFX。" },
+  { key: "sources", title: "1. 源剧池", note: "红果抓取或手动一句话，两种入口任选。" },
+  { key: "distill", title: "2. 一句话提炼", note: "把红果源剧压成一句题材；手动入口跳过此步。导出审核 CSV 可改写。" },
+  { key: "creative", title: "3. 三幕创意", note: "结构化输出：剧名/第一主角/视角/受众/类型/背景/Act1-3。" },
+  { key: "screenplay", title: "4. 完整剧本", note: "按 docx 格式输出第N集 + N-M 子场次（场景/人物/画面/台词/钩子）。" },
+  { key: "storyboard", title: "5. 分镜脚本", note: "逐场拆镜：镜号、景别、机位、画面、台词/SFX。" },
 ];
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -110,6 +112,8 @@ export function BatchFactoryClient() {
   const [scrapeSource, setScrapeSource] = React.useState<ScrapeSource>("latest");
   const [scraped, setScraped] = React.useState<ScrapedDrama[]>([]);
   const [importText, setImportText] = React.useState("");
+  const [sourceMode, setSourceMode] = React.useState<SourceMode>("hongguo");
+  const [manualText, setManualText] = React.useState("");
 
   const refreshList = React.useCallback(async () => {
     try {
@@ -152,7 +156,7 @@ export function BatchFactoryClient() {
   // in a `*_running` state (the run finished while the page was open).
   React.useEffect(() => {
     if (!active) return;
-    const stages: Stage[] = ["creative", "screenplay", "storyboard"];
+    const stages: Stage[] = ["distill", "creative", "screenplay", "storyboard"];
     const stageWithRunning = stages.find((stage) =>
       items.some((item) => item.status === `${stage}_running`)
     );
@@ -172,15 +176,33 @@ export function BatchFactoryClient() {
   async function createBatch() {
     setBusy("create");
     try {
+      const payloadText = sourceMode === "manual" ? manualText : sourceText;
+      if (!payloadText.trim()) {
+        toast.error(sourceMode === "manual" ? "请先输入至少一行一句话题材" : "请先抓取或粘贴红果源剧");
+        return;
+      }
       const data = await api<{ item: BatchProject; items: BatchItem[] }>("/api/batches", {
         method: "POST",
-        body: JSON.stringify({ title, sourceText, targetMarket, totalEpisodes, useComplexReversal }),
+        body: JSON.stringify({
+          title,
+          sourceText: payloadText,
+          targetMarket,
+          totalEpisodes,
+          useComplexReversal,
+          sourceMode,
+        }),
       });
-      toast.success(`已解析 ${data.items.length} 部红果源剧`);
+      toast.success(
+        sourceMode === "manual"
+          ? `已收录 ${data.items.length} 条一句话题材，可直接进入「三幕创意」步`
+          : `已解析 ${data.items.length} 部红果源剧`
+      );
       setActive(data.item);
       setItems(data.items);
       setBatches((prev) => [data.item, ...prev]);
-      setStep("sources");
+      // Manual entries already have oneLiner — jump straight to creative step
+      // so the user doesn't bounce off an empty distill table.
+      setStep(sourceMode === "manual" ? "creative" : "sources");
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -233,6 +255,52 @@ export function BatchFactoryClient() {
     }
     // NOTE: we do NOT clear `busy` here — the polling effect below clears it
     // once every targeted item has left its `*_running` status.
+  }
+
+  // Fire creative → screenplay → storyboard in one shot. The supervisor
+  // runs them sequentially; the polling effect transitions runInfo as each
+  // stage finishes, so the UI naturally walks through 创意 → 剧本 → 分镜
+  // without further clicks. Also works after creative is already done — the
+  // chain skips empty stages because each stage's selectTargets filters out
+  // already-completed rows.
+  async function runChain() {
+    if (!active || busy) return;
+    const fromStage: Stage =
+      selectTargetIds(items, "creative").length > 0
+        ? "creative"
+        : selectTargetIds(items, "screenplay").length > 0
+          ? "screenplay"
+          : "storyboard";
+    const initialTargets = selectTargetIds(items, fromStage);
+    if (initialTargets.length === 0) {
+      toast.error("已无可生成的项，三幕创意 / 剧本 / 分镜均已完成");
+      return;
+    }
+    setRunInfo({ stage: fromStage, targetIds: initialTargets, startedAt: Date.now() });
+    setBusy(fromStage);
+    try {
+      const data = await api<{ run: { state: "started" | "already_running"; startedAt: number } }>(
+        `/api/batches/${active.id}/run`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            chain: true,
+            fromStage,
+            selectedOnly: true,
+            batchSize,
+          }),
+        }
+      );
+      if (data.run.state === "already_running") {
+        toast.message("已有任务在跑，将继续显示进度");
+      } else {
+        toast.success("已派发到后端：创意 → 剧本 → 分镜，全程后台执行，刷新/关闭页面不中断");
+      }
+      await refreshActive(active.id);
+    } catch (err) {
+      toast.error((err as Error).message);
+      setBusy(null);
+    }
   }
 
   async function importCsv() {
@@ -364,6 +432,8 @@ export function BatchFactoryClient() {
           active={active}
           items={visibleItems}
           importText={importText}
+          sourceMode={sourceMode}
+          manualText={manualText}
           onTitle={setTitle}
           onSourceText={setSourceText}
           onTargetMarket={setTargetMarket}
@@ -377,6 +447,28 @@ export function BatchFactoryClient() {
           onImportText={setImportText}
           onImport={importCsv}
           onDelete={deleteItem}
+          onSourceMode={setSourceMode}
+          onManualText={setManualText}
+        />
+      )}
+
+      {step === "distill" && active && (
+        <GenerationStep
+          step="distill"
+          title="一句话提炼"
+          description="把每部红果源剧压成 30–60 字的核心一句话，作为后续创意阶段的题材输入。导出审核 CSV 可直接编辑一句话再导回。"
+          active={active}
+          items={visibleItems}
+          busy={busy}
+          batchSize={batchSize}
+          importText={importText}
+          runInfo={runInfo}
+          onBatchSize={setBatchSize}
+          onRun={() => run("distill")}
+          onImportText={setImportText}
+          onImport={importCsv}
+          onDelete={deleteItem}
+          onRefresh={() => refreshActive(active.id)}
         />
       )}
 
@@ -393,6 +485,7 @@ export function BatchFactoryClient() {
           runInfo={runInfo}
           onBatchSize={setBatchSize}
           onRun={() => run("creative")}
+          onChainRun={runChain}
           onImportText={setImportText}
           onImport={importCsv}
           onDelete={deleteItem}
@@ -457,6 +550,8 @@ function SourcesStep({
   active,
   items,
   importText,
+  sourceMode,
+  manualText,
   onTitle,
   onSourceText,
   onTargetMarket,
@@ -470,6 +565,8 @@ function SourcesStep({
   onImportText,
   onImport,
   onDelete,
+  onSourceMode,
+  onManualText,
 }: {
   title: string;
   sourceText: string;
@@ -484,6 +581,8 @@ function SourcesStep({
   active: BatchProject | null;
   items: BatchItem[];
   importText: string;
+  sourceMode: SourceMode;
+  manualText: string;
   onTitle: (value: string) => void;
   onSourceText: (value: string) => void;
   onTargetMarket: (value: Market) => void;
@@ -497,6 +596,8 @@ function SourcesStep({
   onImportText: (value: string) => void;
   onImport: () => void;
   onDelete: (item: BatchItem) => void;
+  onSourceMode: (value: SourceMode) => void;
+  onManualText: (value: string) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -505,41 +606,81 @@ function SourcesStep({
           <div>
             <div className="text-sm font-semibold">源剧池输入</div>
             <div className="mt-1 text-xs leading-relaxed text-[color:var(--color-muted)]">
-              每一行是一部红果源剧，对应后续一个新剧候选。公开抓取仅用于建立源剧池，准确性以人工审核后的 CSV 为准。
+              两种入口任选：从红果抓 / 自行输入一句话题材。手动入口跳过「一句话提炼」步，直接进入三幕创意。
             </div>
           </div>
           <Input value={title} onChange={(e) => onTitle(e.target.value)} placeholder="批次名称" />
-          <div className="grid gap-3 md:grid-cols-[1fr_140px_190px_150px]">
-            <select
-              value={scrapeSource}
-              onChange={(e) => onScrapeSource(e.target.value as ScrapeSource)}
-              className="h-9 rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 text-sm"
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] p-1">
+            <button
+              type="button"
+              onClick={() => onSourceMode("hongguo")}
+              className={`rounded px-3 py-1.5 text-sm transition ${
+                sourceMode === "hongguo"
+                  ? "bg-[color:var(--color-primary)] text-white"
+                  : "text-[color:var(--color-muted)] hover:text-[color:var(--color-text)]"
+              }`}
             >
-              <option value="latest">最近更新（简介更完整）</option>
-              <option value="rank">红果榜单（部分无简介）</option>
-            </select>
-            <Input
-              type="number"
-              min={1}
-              max={30}
-              value={scrapeLimit}
-              onChange={(e) => onScrapeLimit(Number(e.target.value) || 12)}
-              placeholder="抓取数量"
-            />
-            <Button type="button" variant="secondary" onClick={onScrape} disabled={busy === "scrape"}>
-              {busy === "scrape" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe2 className="h-4 w-4" />}
-              抓取公开数据
-            </Button>
-            <Badge tone={scrapedCount ? "success" : "muted"} className="justify-center rounded-md py-2">
-              已抓取 {scrapedCount} 部
-            </Badge>
+              红果抓取
+            </button>
+            <button
+              type="button"
+              onClick={() => onSourceMode("manual")}
+              className={`rounded px-3 py-1.5 text-sm transition ${
+                sourceMode === "manual"
+                  ? "bg-[color:var(--color-primary)] text-white"
+                  : "text-[color:var(--color-muted)] hover:text-[color:var(--color-text)]"
+              }`}
+            >
+              手动一句话
+            </button>
           </div>
-          <Textarea
-            value={sourceText}
-            onChange={(e) => onSourceText(e.target.value)}
-            rows={9}
-            placeholder={"示例：\n假冒千金后，我成了豪门真团宠 | 都市日常 / 家庭 / 反转 / 逆袭 | 市井女孩因长相相似被豪门选中假冒千金，卷入继承与真相危机。\n肥妻的涅槃反击 | 复仇 / 逆袭 / 婚姻背叛 | 女主遭丈夫和养妹合谋陷害，恢复视力后伪装反击。"}
-          />
+          {sourceMode === "hongguo" ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-[1fr_140px_190px_150px]">
+                <select
+                  value={scrapeSource}
+                  onChange={(e) => onScrapeSource(e.target.value as ScrapeSource)}
+                  className="h-9 rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 text-sm"
+                >
+                  <option value="latest">最近更新（简介更完整）</option>
+                  <option value="rank">红果榜单（部分无简介）</option>
+                </select>
+                <Input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={scrapeLimit}
+                  onChange={(e) => onScrapeLimit(Number(e.target.value) || 12)}
+                  placeholder="抓取数量"
+                />
+                <Button type="button" variant="secondary" onClick={onScrape} disabled={busy === "scrape"}>
+                  {busy === "scrape" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe2 className="h-4 w-4" />}
+                  抓取公开数据
+                </Button>
+                <Badge tone={scrapedCount ? "success" : "muted"} className="justify-center rounded-md py-2">
+                  已抓取 {scrapedCount} 部
+                </Badge>
+              </div>
+              <Textarea
+                value={sourceText}
+                onChange={(e) => onSourceText(e.target.value)}
+                rows={9}
+                placeholder={"示例：\n假冒千金后，我成了豪门真团宠 | 都市日常 / 家庭 / 反转 / 逆袭 | 市井女孩因长相相似被豪门选中假冒千金，卷入继承与真相危机。\n肥妻的涅槃反击 | 复仇 / 逆袭 / 婚姻背叛 | 女主遭丈夫和养妹合谋陷害，恢复视力后伪装反击。"}
+              />
+            </>
+          ) : (
+            <>
+              <div className="rounded-md border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 py-2 text-xs text-[color:var(--color-muted)]">
+                每一行 = 一部剧的一句话题材，建议 30–60 字，包含核心题材标签 + 关系冲突。下一步会跳过「一句话提炼」直接生成三幕创意。
+              </div>
+              <Textarea
+                value={manualText}
+                onChange={(e) => onManualText(e.target.value)}
+                rows={9}
+                placeholder={"示例（每行一部剧）：\n豪门假千金被识破，反手揭穿真千金是反派同谋，公开打脸。\n婚礼上被亿万继承人当众抛弃，女主转身和死对头协议结婚，反追前任。\n职场社畜重生为竞争对手的女老板，开局即收购前公司。"}
+              />
+            </>
+          )}
           <div className="grid gap-3 md:grid-cols-[160px_160px_160px_1fr]">
             <label className="space-y-1">
               <span className="text-xs text-[color:var(--color-muted)]">目标市场</span>
@@ -560,9 +701,13 @@ function SourcesStep({
               <span className="text-xs text-[color:var(--color-muted)]">生成并发数（最大 100）</span>
               <Input type="number" min={1} max={100} value={batchSize} onChange={(e) => onBatchSize(Number(e.target.value) || 16)} />
             </label>
-            <Button className="self-end" onClick={onCreate} disabled={busy === "create" || !sourceText.trim()}>
+            <Button
+              className="self-end"
+              onClick={onCreate}
+              disabled={busy === "create" || (sourceMode === "hongguo" ? !sourceText.trim() : !manualText.trim())}
+            >
               {busy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              解析为源剧任务池
+              {sourceMode === "hongguo" ? "解析为源剧任务池" : "收录为一句话池"}
             </Button>
           </div>
           <label className="flex items-start gap-2 rounded-md border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] p-3 text-xs leading-relaxed">
@@ -613,6 +758,7 @@ function GenerationStep({
   runInfo,
   onBatchSize,
   onRun,
+  onChainRun,
   onImportText,
   onImport,
   onDelete,
@@ -629,6 +775,7 @@ function GenerationStep({
   runInfo: RunInfo | null;
   onBatchSize: (value: number) => void;
   onRun: () => void;
+  onChainRun?: () => void;
   onImportText: (value: string) => void;
   onImport: (() => void) | null;
   onDelete: ((item: BatchItem) => void) | null;
@@ -657,10 +804,23 @@ function GenerationStep({
               <span className="text-xs text-[color:var(--color-muted)]">生成并发数（最大 100）</span>
               <Input type="number" min={1} max={100} value={batchSize} onChange={(e) => onBatchSize(Number(e.target.value) || 16)} />
             </label>
-            <Button className="self-end" onClick={onRun} disabled={Boolean(busy) || targetCount === 0}>
-              {busy === step ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {hasResumablePartial ? `续跑 ${targetCount} 条（保留已生成集）` : `开始生成 ${targetCount} 条`}
-            </Button>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button onClick={onRun} disabled={Boolean(busy) || targetCount === 0}>
+                {busy === step ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {hasResumablePartial ? `续跑 ${targetCount} 条（保留已生成集）` : `开始生成 ${targetCount} 条`}
+              </Button>
+              {onChainRun && (
+                <Button
+                  variant="secondary"
+                  onClick={onChainRun}
+                  disabled={Boolean(busy)}
+                  title="按 创意 → 剧本 → 分镜 顺序后台串行执行；刷新或关闭页面不会中断"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  一键跑完后续阶段（创意 → 剧本 → 分镜）
+                </Button>
+              )}
+            </div>
           </div>
           {runInfo?.stage === step && (
             <BatchRunMonitor info={runInfo} items={items} running={busy === step} onRefresh={onRefresh} totalEpisodes={active.totalEpisodes} />
@@ -685,11 +845,13 @@ function GenerationStep({
         title={stageTableTitle(step)}
         items={items}
         columns={
-          step === "creative"
-            ? ["source", "creative", "status", "actions"]
-            : step === "screenplay"
-              ? ["creative", "screenplay", "status", "actions"]
-              : ["screenplay", "storyboard", "status", "actions"]
+          step === "distill"
+            ? ["source", "oneLiner", "status", "actions"]
+            : step === "creative"
+              ? ["oneLiner", "creative", "status", "actions"]
+              : step === "screenplay"
+                ? ["creative", "screenplay", "status", "actions"]
+                : ["screenplay", "storyboard", "status", "actions"]
         }
         onDelete={onDelete ?? undefined}
         totalEpisodes={active.totalEpisodes}
@@ -871,7 +1033,7 @@ function ItemsTable({
 }: {
   title: string;
   items: BatchItem[];
-  columns: Array<"source" | "creative" | "screenplay" | "storyboard" | "status" | "actions">;
+  columns: Array<"source" | "oneLiner" | "creative" | "screenplay" | "storyboard" | "status" | "actions">;
   onDelete?: (item: BatchItem) => void;
   totalEpisodes?: number;
 }) {
@@ -886,6 +1048,7 @@ function ItemsTable({
           <thead className="bg-[color:var(--color-surface-2)] text-left text-[11px] text-[color:var(--color-muted)]">
             <tr>
               {columns.includes("source") && <th className="px-3 py-2">红果源剧</th>}
+              {columns.includes("oneLiner") && <th className="px-3 py-2">一句话题材</th>}
               {columns.includes("creative") && <th className="px-3 py-2">三幕创意</th>}
               {columns.includes("screenplay") && <th className="px-3 py-2">完整剧本</th>}
               {columns.includes("storyboard") && <th className="px-3 py-2">分镜脚本</th>}
@@ -905,9 +1068,16 @@ function ItemsTable({
                 <tr key={item.id} className="align-top">
                   {columns.includes("source") && (
                     <td className="max-w-[360px] px-3 py-2">
-                      <div className="font-medium">{item.sourceTitle || "未命名源剧"}</div>
+                      <div className="font-medium">{item.sourceTitle || "手动输入"}</div>
                       {item.sourceKeywords && <div className="mt-1 text-[color:var(--color-muted)]">{item.sourceKeywords}</div>}
                       <div className="mt-1 line-clamp-3 text-[color:var(--color-muted)]">{item.sourceSummary || item.sourceText || "-"}</div>
+                    </td>
+                  )}
+                  {columns.includes("oneLiner") && (
+                    <td className="max-w-[360px] px-3 py-2">
+                      <div className="line-clamp-4 leading-relaxed text-[color:var(--color-text)]">
+                        {item.oneLiner || "-"}
+                      </div>
                     </td>
                   )}
                   {columns.includes("creative") && (
@@ -988,11 +1158,13 @@ function StepCount({ step, counts }: { step: WorkflowStep; counts: ReturnType<ty
   const value =
     step === "sources"
       ? `${counts.total}`
-      : step === "creative"
-        ? `${counts.creativeReady}/${counts.total}`
-        : step === "screenplay"
-          ? `${counts.screenplayReady}/${counts.creativeReady}`
-          : `${counts.storyboardReady}/${counts.screenplayReady}`;
+      : step === "distill"
+        ? `${counts.distillReady}/${counts.total}`
+        : step === "creative"
+          ? `${counts.creativeReady}/${counts.distillReady || counts.total}`
+          : step === "screenplay"
+            ? `${counts.screenplayReady}/${counts.creativeReady}`
+            : `${counts.storyboardReady}/${counts.screenplayReady}`;
   return <Badge tone="muted">{value}</Badge>;
 }
 
@@ -1110,6 +1282,7 @@ function StatusBadge({ status }: { status: string }) {
 function getCounts(items: BatchItem[]) {
   return {
     total: items.length,
+    distillReady: items.filter((item) => item.oneLiner).length,
     creativeReady: items.filter((item) => item.creativeMd || item.act1).length,
     screenplayReady: items.filter((item) => item.screenplayMd).length,
     storyboardReady: items.filter((item) => item.storyboardMd).length,
@@ -1122,7 +1295,7 @@ function filterItemsForStep(items: BatchItem[], _step: WorkflowStep): BatchItem[
 }
 
 function isRunStage(value: BusyState | null): value is Stage {
-  return value === "creative" || value === "screenplay" || value === "storyboard";
+  return value === "distill" || value === "creative" || value === "screenplay" || value === "storyboard";
 }
 
 function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
@@ -1133,9 +1306,18 @@ function selectTargetIds(items: BatchItem[], stage: Stage): string[] {
   // resume" and "container restarted mid-run, status got stuck".
   const isResumable = (item: BatchItem, runningStatus: string): boolean =>
     item.status === "failed" || item.status === runningStatus;
+  if (stage === "distill") {
+    return items
+      .filter((item) => item.sourceText && (!item.oneLiner || isResumable(item, "distill_running")))
+      .map((item) => item.id);
+  }
   if (stage === "creative") {
     return items
-      .filter((item) => item.sourceText && ((!item.creativeMd && !item.act1) || isResumable(item, "creative_running")))
+      .filter(
+        (item) =>
+          (item.oneLiner || item.sourceText) &&
+          ((!item.creativeMd && !item.act1) || isResumable(item, "creative_running"))
+      )
       .map((item) => item.id);
   }
   if (stage === "screenplay") {
@@ -1170,12 +1352,14 @@ function stageStats(info: RunInfo, items: BatchItem[]) {
 }
 
 function stageLabel(stage: Stage): string {
+  if (stage === "distill") return "批量提炼一句话";
   if (stage === "creative") return "批量生成三幕创意";
   if (stage === "screenplay") return "批量生成完整剧本";
   return "批量生成分镜脚本";
 }
 
 function stageTableTitle(stage: Stage): string {
+  if (stage === "distill") return "一句话候选";
   if (stage === "creative") return "三幕创意候选";
   if (stage === "screenplay") return "完整剧本候选";
   return "分镜脚本候选";
@@ -1184,6 +1368,8 @@ function stageTableTitle(stage: Stage): string {
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
     source_ready: "源剧就绪",
+    distill_running: "一句话生成中",
+    distill_ready: "一句话完成",
     creative_running: "创意生成中",
     creative_ready: "创意完成",
     screenplay_running: "剧本生成中",

@@ -42,6 +42,9 @@ async function main() {
       act1: first.act1 ?? "",
       act2: first.act2 ?? "",
       act3: first.act3 ?? "",
+      worldview: first.worldview ?? "",
+      visualTone: first.visualTone ?? "",
+      coreTheme: first.coreTheme ?? "",
     });
   }
 

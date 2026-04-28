@@ -4,6 +4,7 @@ import { streamLLM } from "../llm/stream";
 import type { LLMConfig, LLMMessage } from "../llm/types";
 import {
   buildCreativeMessages,
+  buildDistillMessages,
   buildScreenplayChunkMessages,
   buildStoryboardChunkMessages,
 } from "./prompts";
@@ -52,7 +53,23 @@ export async function runBatchStage(input: {
     if (input.signal?.aborted) throw new Error("已取消");
     try {
       updateBatchItem(item.id, { status: `${input.stage}_running` as BatchItem["status"], error: "" });
-      if (input.stage === "creative") {
+      if (input.stage === "distill") {
+        const { content } = await collectLLM(cfg, buildDistillMessages(item, project.targetMarket), {
+          temperature: 0.4,
+          maxTokens: TOKEN_BUDGETS.shortDraft,
+          signal: input.signal,
+        });
+        // Strip stray prefixes/quotes the model sometimes prepends despite
+        // the system instructions (一句话：xxx, "xxx"，「xxx」). Keep only
+        // the first non-empty line — the prompt explicitly asks for a single
+        // sentence so anything beyond is noise.
+        const oneLiner = sanitizeDistillOutput(content);
+        updateBatchItem(item.id, {
+          oneLiner,
+          status: "distill_ready",
+          error: "",
+        });
+      } else if (input.stage === "creative") {
         const { content } = await collectLLM(cfg, buildCreativeMessages(project, item), {
           temperature: 0.75,
           maxTokens: TOKEN_BUDGETS.longArtifact,
@@ -61,6 +78,9 @@ export async function runBatchStage(input: {
         const parsed = parseCreativeStructured(content);
         updateBatchItem(item.id, {
           ...parsed,
+          // Preserve the distill-stage oneLiner — `parsed` no longer carries
+          // a oneLiner field, but defending against future regressions.
+          oneLiner: item.oneLiner || parsed.oneLiner || "",
           creativeMd: renderCreativeMd(parsed, content),
           status: "creative_ready",
           error: "",
@@ -106,7 +126,26 @@ export async function runBatchStage(input: {
 function resolveConfigForBatchStage(stage: BatchStage): LLMConfig | null {
   if (stage === "screenplay") return resolveConfigForCommand("episode");
   if (stage === "storyboard") return resolveConfigForCommand("episode");
+  // distill + creative both fall back to the start/creative slot.
   return resolveConfigForCommand("creative") ?? resolveConfigForCommand("start");
+}
+
+// Best-effort cleanup of distill output. The system prompt forbids prefixes
+// and surrounding quotes, but providers occasionally ignore that. Keep the
+// first non-empty line and strip wrapping quotes / Markdown noise.
+function sanitizeDistillOutput(raw: string): string {
+  const firstLine = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? "";
+  return firstLine
+    .replace(/^[#*\-\d.、)]+\s*/, "")
+    .replace(/^一句话(?:题材)?[:：]\s*/, "")
+    .replace(/^本剧讲述[:：]?\s*/, "")
+    .replace(/^[「『""'']+/, "")
+    .replace(/[」』""'']+$/, "")
+    .replace(/\*\*/g, "")
+    .trim();
 }
 
 function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: boolean): BatchItem[] {
@@ -116,10 +155,22 @@ function selectTargets(items: BatchItem[], stage: BatchStage, selectedOnly: bool
   // existing partial output from the DB and continues from the cursor.
   const isResumable = (status: BatchItem["status"], stageRunning: BatchItem["status"]): boolean =>
     status === "failed" || status === stageRunning;
-  if (stage === "creative") {
+  if (stage === "distill") {
     return items.filter(
       (item) =>
         item.sourceText &&
+        (!item.oneLiner || isResumable(item.status, "distill_running")) &&
+        (!selectedOnly || item.ideaSelected)
+    );
+  }
+  if (stage === "creative") {
+    return items.filter(
+      (item) =>
+        // Creative stage now consumes the distilled one-liner. Manual entries
+        // already have oneLiner filled and status === "distill_ready"; Hongguo
+        // entries get their oneLiner from the distill stage. We fall back to
+        // sourceText for legacy batches where oneLiner was never populated.
+        (item.oneLiner || item.sourceText) &&
         ((!item.creativeMd && !item.act1) || isResumable(item.status, "creative_running")) &&
         (!selectedOnly || item.ideaSelected)
     );
@@ -171,6 +222,9 @@ export interface ParsedCreative {
   act1: string;
   act2: string;
   act3: string;
+  worldview: string;
+  visualTone: string;
+  coreTheme: string;
 }
 
 const CREATIVE_LABELS: Array<{ key: keyof ParsedCreative; aliases: RegExp }> = [
@@ -180,6 +234,9 @@ const CREATIVE_LABELS: Array<{ key: keyof ParsedCreative; aliases: RegExp }> = [
   { key: "audience", aliases: /^受众/ },
   { key: "storyType", aliases: /^故事类型/ },
   { key: "setting", aliases: /^故事背景/ },
+  { key: "worldview", aliases: /^世界观设定/ },
+  { key: "visualTone", aliases: /^视觉基调/ },
+  { key: "coreTheme", aliases: /^核心主题/ },
 ];
 
 export function parseCreativeStructured(content: string): ParsedCreative {
@@ -194,6 +251,9 @@ export function parseCreativeStructured(content: string): ParsedCreative {
     act1: "",
     act2: "",
     act3: "",
+    worldview: "",
+    visualTone: "",
+    coreTheme: "",
   };
   const rawLines = content.split(/\r?\n/);
   const lines = rawLines.map((line) =>
@@ -252,11 +312,10 @@ export function parseCreativeStructured(content: string): ParsedCreative {
   out.act2 = actBlocks.act2;
   out.act3 = actBlocks.act3;
 
-  // one-liner: 优先用故事类型或第一段 Act 1 的开头压缩
-  if (!out.oneLiner) {
-    const seed = out.storyType || (out.act1 ? out.act1.slice(0, 60) : "");
-    out.oneLiner = seed.replace(/\s+/g, " ").trim();
-  }
+  // Note: oneLiner is owned by the distill stage now and intentionally NOT
+  // derived here — the runner explicitly preserves item.oneLiner when
+  // applying the parsed creative output. The field stays on ParsedCreative
+  // only for backward-compat with extractCreativeHead callers.
 
   // 清理 title 残留
   out.title = out.title.replace(/^《(.+)》$/, "$1").trim();
@@ -272,6 +331,8 @@ function isAnyLabel(line: string): boolean {
   return false;
 }
 
+const POST_ACT_LABELS = /^(?:世界观设定|视觉基调|核心主题)/;
+
 function extractActs(rawLines: string[]): { act1: string; act2: string; act3: string } {
   const trimmed = rawLines.map((line) =>
     line.replace(/^#+\s*/, "").replace(/^[*-]\s*/, "").replace(/\*\*/g, "")
@@ -281,6 +342,8 @@ function extractActs(rawLines: string[]): { act1: string; act2: string; act3: st
   const idx1 = find(/^(?:故事梗概[:：]?\s*)?Act\s*1[:：]/i);
   const idx2 = find(/^Act\s*2[:：]/i);
   const idx3 = find(/^Act\s*3[:：]/i);
+  // Act 3 ends at the first post-act section (世界观设定/视觉基调/核心主题) or EOF.
+  const idxPostAct = trimmed.findIndex((line) => POST_ACT_LABELS.test(line.trim()));
   const slice = (from: number, to: number): string => {
     if (from < 0) return "";
     const end = to > from ? to : trimmed.length;
@@ -290,14 +353,16 @@ function extractActs(rawLines: string[]): { act1: string; act2: string; act3: st
     for (let i = from + 1; i < end; i += 1) {
       const line = trimmed[i];
       if (/^(?:故事梗概[:：]?\s*)?Act\s*[123][:：]/i.test(line.trim())) break;
+      if (POST_ACT_LABELS.test(line.trim())) break;
       buf.push(line);
     }
     return buf.join("\n").trim();
   };
+  const act3End = idxPostAct >= 0 ? idxPostAct : -1;
   return {
-    act1: slice(idx1, idx2 >= 0 ? idx2 : idx3 >= 0 ? idx3 : -1),
-    act2: slice(idx2, idx3 >= 0 ? idx3 : -1),
-    act3: slice(idx3, -1),
+    act1: slice(idx1, idx2 >= 0 ? idx2 : idx3 >= 0 ? idx3 : act3End),
+    act2: slice(idx2, idx3 >= 0 ? idx3 : act3End),
+    act3: slice(idx3, act3End),
   };
 }
 
@@ -317,6 +382,9 @@ export function renderCreativeMd(parsed: ParsedCreative, fallbackRaw?: string): 
     if (parsed.act2) lines.push("", "**Act 2**", "", parsed.act2);
     if (parsed.act3) lines.push("", "**Act 3**", "", parsed.act3);
   }
+  if (parsed.worldview) lines.push("", "## 世界观设定", "", parsed.worldview);
+  if (parsed.visualTone) lines.push("", "## 视觉基调", "", parsed.visualTone);
+  if (parsed.coreTheme) lines.push("", "## 核心主题", "", parsed.coreTheme);
   return lines.join("\n").trim();
 }
 

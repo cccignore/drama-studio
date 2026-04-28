@@ -8,10 +8,14 @@ export const runtime = "nodejs";
 
 const CreateSchema = z.object({
   title: z.string().optional(),
-  sourceText: z.string().min(1, "请粘贴红果热榜/剧名/关键词"),
+  sourceText: z.string().min(1, "请输入题材内容"),
   targetMarket: z.enum(["domestic", "overseas"]).default("overseas"),
   totalEpisodes: z.number().int().min(1).max(120).optional(),
   useComplexReversal: z.boolean().optional().default(false),
+  // hongguo: sourceText is multi-line `标题|标签|简介`, items go through distill
+  // before creative. manual: each non-empty line is a one-liner; items skip
+  // distill and start at creative.
+  sourceMode: z.enum(["hongguo", "manual"]).optional().default("hongguo"),
 });
 
 export async function GET() {

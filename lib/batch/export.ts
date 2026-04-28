@@ -13,13 +13,15 @@ export function renderBatchMarkdown(project: BatchProject, items: BatchItem[], s
     "",
   ];
   for (const item of items) {
-    parts.push(`## ${item.title || item.id}`);
+    parts.push(`## ${item.title || item.sourceTitle || item.id}`);
     parts.push("");
     if (stage === "sources") {
       parts.push(`源剧名：${item.sourceTitle || item.title || "（空）"}`);
       if (item.sourceKeywords) parts.push(`关键词：${item.sourceKeywords}`);
       if (item.sourceSummary) parts.push(`简介：${item.sourceSummary}`);
       if (item.oneLiner) parts.push(`新一句话题材：${item.oneLiner}`);
+    } else if (stage === "distill") {
+      parts.push(`一句话：${item.oneLiner || "（未提炼）"}`);
     } else if (stage === "creative") {
       const block = renderCreativeBlock(item);
       parts.push(block || "（空）");
@@ -48,6 +50,9 @@ function renderCreativeBlock(item: BatchItem): string {
     if (item.act2) lines.push("", "**Act 2**", "", item.act2);
     if (item.act3) lines.push("", "**Act 3**", "", item.act3);
   }
+  if (item.worldview) lines.push("", "### 世界观设定", "", item.worldview);
+  if (item.visualTone) lines.push("", "### 视觉基调", "", item.visualTone);
+  if (item.coreTheme) lines.push("", "### 核心主题", "", item.coreTheme);
   return lines.join("\n").trim();
 }
 
@@ -55,6 +60,7 @@ export async function buildBatchZip(project: BatchProject, items: BatchItem[]): 
   const zip = new JSZip();
   zip.file("source-dramas.csv", itemsToCsv(items));
   zip.file("source-dramas.md", renderBatchMarkdown(project, items, "sources"));
+  zip.file("distill.md", renderBatchMarkdown(project, items, "distill"));
   zip.file("creative.md", renderBatchMarkdown(project, items, "creative"));
   zip.file("screenplays.md", renderBatchMarkdown(project, items, "screenplay"));
   zip.file("storyboards.md", renderBatchMarkdown(project, items, "storyboard"));

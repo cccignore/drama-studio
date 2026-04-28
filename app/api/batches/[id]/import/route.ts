@@ -59,6 +59,9 @@ function normalizeImportedRow(row: Partial<BatchItem>): Partial<BatchItem> {
       act1: row.act1 ?? "",
       act2: row.act2 ?? "",
       act3: row.act3 ?? "",
+      worldview: row.worldview ?? "",
+      visualTone: row.visualTone ?? "",
+      coreTheme: row.coreTheme ?? "",
     });
   }
   return row;

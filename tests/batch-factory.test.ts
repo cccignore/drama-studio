@@ -41,6 +41,9 @@ function item(patch: Partial<BatchItem> = {}): BatchItem {
     act1: "",
     act2: "",
     act3: "",
+    worldview: "",
+    visualTone: "",
+    coreTheme: "",
     creativeMd: "## Act 1\nFake marriage begins.",
     screenplayMd: "# 第 1 集\n剧本正文",
     storyboardMd: "# 第 1 集分镜\n#001 WS",
@@ -70,14 +73,28 @@ describe("batch factory", () => {
     });
   });
 
-  it("builds a one-to-one creative prompt from a single source drama", () => {
+  it("builds a creative prompt from a one-line topic and enforces 12-label output", () => {
     const messages = buildCreativeMessages(project(), item());
-    expect(messages[1].content).toContain("基于这 1 部红果源剧");
+    // The verified long system prompt (项目目标 / 防串味 / 写作原则) lives on
+    // the system message; the user message is short and centers on the
+    // one-liner plus the strict 12-label format the parser expects (matching
+    // the 4 一级章节: 题材与三幕大纲 + 世界观设定 + 视觉基调 + 核心主题).
+    expect(messages[0].role).toBe("system");
+    expect(messages[0].content).toContain("强投流感");
+    expect(messages[0].content).toContain("防串味要求");
+    expect(messages[1].content).toContain("【一句话题材】");
+    expect(messages[1].content).toContain("基于以上一句话题材");
     expect(messages[1].content).toContain("新剧名:");
     expect(messages[1].content).toContain("第一主角:");
     expect(messages[1].content).toContain("故事梗概: Act 1:");
     expect(messages[1].content).toContain("Act 2:");
     expect(messages[1].content).toContain("Act 3:");
+    expect(messages[1].content).toContain("世界观设定:");
+    expect(messages[1].content).toContain("视觉基调:");
+    expect(messages[1].content).toContain("核心主题:");
+    // The new prompt forbids the model from emitting Optional Upgrade — the
+    // parser only knows the 12 canonical labels.
+    expect(messages[1].content).toContain("严禁输出 Optional Upgrade");
   });
 
   it("keeps overseas review text in Chinese except dialogue & storyboard dialogue", () => {
@@ -106,7 +123,7 @@ describe("batch factory", () => {
     expect(head.oneLiner).toBe("一个女孩假扮豪门继承人并被迫签下契约婚姻。");
   });
 
-  it("parses structured creative output into 8 fields", () => {
+  it("parses structured creative output into 12 fields and stops Act 3 at post-act sections", () => {
     const sample = [
       "新剧名: GLASS PRISON",
       "第一主角: Lucas——28 岁，瘦削敏感的记忆架构师，黑框眼镜下藏着忧郁的眼神。",
@@ -117,6 +134,9 @@ describe("batch factory", () => {
       "故事梗概: Act 1: Lucas 在玻璃监狱工作，构建囚犯记忆。",
       "Act 2: Lucas 发现自己也是囚犯。",
       "Act 3: Lucas 在真实监狱中觉醒。",
+      "世界观设定: 2050 年的极权国家用记忆作为流通货币，玻璃监狱是中央服务器。",
+      "视觉基调: 高对比冷蓝 + 单点光面孔特写，参考《银翼杀手 2049》。",
+      "核心主题: 身份是被剥夺的，最深的反抗是夺回记忆。",
     ].join("\n");
     const parsed = parseCreativeStructured(sample);
     expect(parsed.title).toBe("GLASS PRISON");
@@ -126,7 +146,13 @@ describe("batch factory", () => {
     expect(parsed.act1).toContain("玻璃监狱");
     expect(parsed.act2).toContain("Lucas 发现自己");
     expect(parsed.act3).toContain("真实监狱");
+    // Critical: Act 3 must NOT swallow the three trailing sections.
+    expect(parsed.act3).not.toContain("世界观");
+    expect(parsed.act3).not.toContain("视觉基调");
     expect(parsed.protagonist).toContain("Lucas");
+    expect(parsed.worldview).toContain("玻璃监狱");
+    expect(parsed.visualTone).toContain("高对比冷蓝");
+    expect(parsed.coreTheme).toContain("身份");
   });
 
   it("round trips candidate CSV for human review", () => {

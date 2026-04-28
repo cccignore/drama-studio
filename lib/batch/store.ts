@@ -32,6 +32,9 @@ interface BatchItemRow {
   act1: string | null;
   act2: string | null;
   act3: string | null;
+  worldview: string | null;
+  visual_tone: string | null;
+  core_theme: string | null;
   creative_md: string | null;
   screenplay_md: string | null;
   storyboard_md: string | null;
@@ -77,6 +80,9 @@ function rowToItem(row: BatchItemRow): BatchItem {
     act1: row.act1 ?? "",
     act2: row.act2 ?? "",
     act3: row.act3 ?? "",
+    worldview: row.worldview ?? "",
+    visualTone: row.visual_tone ?? "",
+    coreTheme: row.core_theme ?? "",
     creativeMd: row.creative_md ?? "",
     screenplayMd: row.screenplay_md ?? "",
     storyboardMd: row.storyboard_md ?? "",
@@ -120,6 +126,7 @@ export function createBatchProject(input: {
   targetMarket: BatchMarket;
   totalEpisodes?: number;
   useComplexReversal?: boolean;
+  sourceMode?: "hongguo" | "manual";
 }): BatchProject {
   const now = Date.now();
   const id = `bat_${nanoid(10)}`;
@@ -141,8 +148,17 @@ export function createBatchProject(input: {
       now,
       now
     );
-  const sources = parseSourceDramas(input.sourceText);
-  if (sources.length > 0) insertSourceDramas(id, sources);
+  const mode = input.sourceMode ?? "hongguo";
+  if (mode === "manual") {
+    const lines = input.sourceText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length >= 6); // reject "复仇" or "重生" 这种过短输入
+    if (lines.length > 0) insertManualOneLiners(id, lines);
+  } else {
+    const sources = parseSourceDramas(input.sourceText);
+    if (sources.length > 0) insertSourceDramas(id, sources);
+  }
   return getBatchProject(id)!;
 }
 
@@ -192,6 +208,30 @@ export function getBatchItem(id: string): BatchItem | null {
     .prepare(`SELECT * FROM batch_items WHERE id = ?`)
     .get(id) as BatchItemRow | undefined;
   return row ? rowToItem(row) : null;
+}
+
+// Manual entry: each line is already a polished one-liner from the user, so
+// items skip the distill stage and land at status="distill_ready" — the
+// creative stage will pick them up directly.
+export function insertManualOneLiners(batchId: string, lines: string[]): BatchItem[] {
+  const db = getDb();
+  const now = Date.now();
+  const insert = db.prepare(
+    `INSERT INTO batch_items
+     (id, batch_id, source_title, source_keywords, source_summary, source_text, title, one_liner, status, created_at, updated_at)
+     VALUES (?, ?, '', '', '', ?, '', ?, 'distill_ready', ?, ?)`
+  );
+  const ids: string[] = [];
+  const tx = db.transaction(() => {
+    for (const line of lines) {
+      const id = `bit_${nanoid(10)}`;
+      ids.push(id);
+      insert.run(id, batchId, line, line, now + ids.length, now + ids.length);
+    }
+    db.prepare(`UPDATE batch_projects SET status = ?, updated_at = ? WHERE id = ?`).run("distill_ready", now, batchId);
+  });
+  tx();
+  return ids.map((id) => getBatchItem(id)!).filter(Boolean);
 }
 
 export function insertSourceDramas(batchId: string, sources: ParsedSourceDrama[]): BatchItem[] {
@@ -245,9 +285,10 @@ export function upsertImportedItems(
           `INSERT INTO batch_items
            (id, batch_id, source_title, source_keywords, source_summary, source_text, title, one_liner,
             protagonist, narrative_pov, audience, story_type, setting_text, act1, act2, act3,
+            worldview, visual_tone, core_theme,
             creative_md, screenplay_md, storyboard_md,
             idea_selected, creative_selected, screenplay_selected, status, error, meta_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -266,6 +307,9 @@ export function upsertImportedItems(
           row.act1 ?? "",
           row.act2 ?? "",
           row.act3 ?? "",
+          row.worldview ?? "",
+          row.visualTone ?? "",
+          row.coreTheme ?? "",
           row.creativeMd ?? "",
           row.screenplayMd ?? "",
           row.storyboardMd ?? "",
@@ -347,6 +391,7 @@ export function updateBatchItem(id: string, patch: Partial<BatchItem>): BatchIte
       `UPDATE batch_items
        SET source_title = ?, source_keywords = ?, source_summary = ?, source_text = ?, title = ?, one_liner = ?,
            protagonist = ?, narrative_pov = ?, audience = ?, story_type = ?, setting_text = ?, act1 = ?, act2 = ?, act3 = ?,
+           worldview = ?, visual_tone = ?, core_theme = ?,
            creative_md = ?, screenplay_md = ?, storyboard_md = ?,
            idea_selected = ?, creative_selected = ?, screenplay_selected = ?, status = ?, error = ?, meta_json = ?,
            updated_at = ?
@@ -367,6 +412,9 @@ export function updateBatchItem(id: string, patch: Partial<BatchItem>): BatchIte
       next.act1,
       next.act2,
       next.act3,
+      next.worldview,
+      next.visualTone,
+      next.coreTheme,
       next.creativeMd,
       next.screenplayMd,
       next.storyboardMd,

@@ -7,7 +7,7 @@ import type { BatchStage } from "@/lib/batch/types";
 
 export const runtime = "nodejs";
 
-const STAGES = new Set(["sources", "creative", "screenplay", "storyboard"]);
+const STAGES = new Set(["sources", "distill", "creative", "screenplay", "storyboard"]);
 const FORMATS = new Set(["csv", "md", "zip"]);
 
 function safeFileName(input: string): string {

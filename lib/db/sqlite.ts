@@ -83,6 +83,9 @@ function runMigrations(db: Database.Database) {
       act1                  TEXT,
       act2                  TEXT,
       act3                  TEXT,
+      worldview             TEXT,
+      visual_tone           TEXT,
+      core_theme            TEXT,
       creative_md           TEXT,
       screenplay_md         TEXT,
       storyboard_md         TEXT,
@@ -122,6 +125,9 @@ function runMigrations(db: Database.Database) {
     "act1",
     "act2",
     "act3",
+    "worldview",
+    "visual_tone",
+    "core_theme",
   ]) {
     if (!hasBatchColumn(col)) {
       db.exec(`ALTER TABLE batch_items ADD COLUMN ${col} TEXT`);

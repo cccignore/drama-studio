@@ -15,6 +15,9 @@ const HEADERS = [
   "act1",
   "act2",
   "act3",
+  "worldview",
+  "visual_tone",
+  "core_theme",
   "one_liner",
   "status",
   "error",
@@ -32,12 +35,18 @@ export function itemsToCsv(items: BatchItem[]): string {
 
 // Simplified CSV intended for delivery / external review. Columns grow with
 // the pipeline stage so people only see what's actually been produced:
+//   distill    → 一句话
 //   creative   → 剧名 | 题材 | 三幕创意
 //   screenplay → + 完整剧本
 //   storyboard → + 分镜脚本
-// Not designed to round-trip: the import path still parses the legacy schema.
+// Distill round-trips: importing back populates `oneLiner` so the user can
+// edit the one-liner externally and reload it.
 export function itemsToSimpleCsv(items: BatchItem[], stage: BatchStage): string {
-  const headers = ["剧名", "题材", "三幕创意"];
+  if (stage === "distill") {
+    const rows = [["一句话"], ...items.map((item) => [item.oneLiner || ""])];
+    return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  }
+  const headers = ["剧名", "题材", "三幕创意", "世界观设定", "视觉基调", "核心主题"];
   if (stage === "screenplay" || stage === "storyboard") headers.push("完整剧本");
   if (stage === "storyboard") headers.push("分镜脚本");
   const rows = [headers, ...items.map((item) => simpleRow(item, stage))];
@@ -49,6 +58,9 @@ function simpleRow(item: BatchItem, stage: BatchStage): string[] {
     item.title || item.sourceTitle || "",
     item.storyType || "",
     threeActs(item),
+    item.worldview || "",
+    item.visualTone || "",
+    item.coreTheme || "",
   ];
   if (stage === "screenplay" || stage === "storyboard") row.push(item.screenplayMd || "");
   if (stage === "storyboard") row.push(item.storyboardMd || "");
@@ -78,6 +90,9 @@ function itemToRow(item: BatchItem): string[] {
     item.act1,
     item.act2,
     item.act3,
+    item.worldview,
+    item.visualTone,
+    item.coreTheme,
     item.oneLiner,
     item.status,
     item.error,
@@ -113,7 +128,7 @@ export function csvToItems(csv: string): Array<Partial<BatchItem> & { id?: strin
       sourceKeywords: value(row, index("source_keywords")),
       sourceSummary: value(row, index("source_summary")),
       title: value(row, index("target_title"), index("title")),
-      oneLiner: value(row, index("one_liner")),
+      oneLiner: value(row, index("one_liner"), index("一句话")),
       sourceText: value(row, index("source_text")),
       protagonist: value(row, index("protagonist")),
       narrativePov: value(row, index("narrative_pov")),
@@ -123,6 +138,9 @@ export function csvToItems(csv: string): Array<Partial<BatchItem> & { id?: strin
       act1: value(row, index("act1")),
       act2: value(row, index("act2")),
       act3: value(row, index("act3")),
+      worldview: value(row, index("worldview")),
+      visualTone: value(row, index("visual_tone")),
+      coreTheme: value(row, index("core_theme")),
       creativeMd: value(row, index("creative_md")),
       screenplayMd: value(row, index("screenplay_md")),
       storyboardMd: value(row, index("storyboard_md")),
