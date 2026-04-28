@@ -915,6 +915,7 @@ function ReviewBox({
         {active && <DownloadLink id={active.id} stage={stage} format="csv" label="导出审核 CSV" />}
         {active && <DownloadLink id={active.id} stage={stage} format="md" label="导出 Markdown" />}
         {active && stage === "storyboard" && <DownloadLink id={active.id} stage="sources" format="zip" label="导出 Zip" />}
+        {active && stage === "storyboard" && <FeishuExportButton id={active.id} />}
       </div>
       {onImport && (
         <>
@@ -1151,6 +1152,44 @@ function DownloadLink({ id, stage, format, label }: { id: string; stage: ExportS
         <Download className="h-4 w-4" /> {label}
       </Button>
     </a>
+  );
+}
+
+function FeishuExportButton({ id }: { id: string }) {
+  const [busy, setBusy] = React.useState(false);
+  const onClick = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // Optional: let users override the destination per-batch via localStorage
+      // (set window.localStorage.feishuBitableUrl in DevTools). Falls back to
+      // the server-side FEISHU_BITABLE_URL env var.
+      const overrideUrl = typeof window !== "undefined" ? window.localStorage.getItem("feishuBitableUrl") : null;
+      const res = await fetch(`/api/batches/${id}/export/feishu`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(overrideUrl ? { bitableUrl: overrideUrl } : {}),
+      });
+      const data = (await res.json()) as
+        | { success: true; data: { bitableUrl: string; exported: number; skipped: Array<{ title: string; reason: string }> } }
+        | { success: false; error: { code: string; message: string } };
+      if (!data.success) throw new Error(data.error.message);
+      const { exported, skipped, bitableUrl } = data.data;
+      const skipNote = skipped.length ? `；跳过 ${skipped.length} 条（${skipped.map((s) => s.title).join("、")}）` : "";
+      toast.success(`已导出 ${exported} 条到飞书多维表格${skipNote}`, {
+        action: { label: "打开", onClick: () => window.open(bitableUrl, "_blank") },
+        duration: 10000,
+      });
+    } catch (err) {
+      toast.error((err as Error).message || "导出到飞书失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Button type="button" size="sm" variant="secondary" onClick={onClick} disabled={busy}>
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} 导出到飞书
+    </Button>
   );
 }
 
