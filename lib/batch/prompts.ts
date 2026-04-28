@@ -663,13 +663,19 @@ export function buildStoryboardChunkMessages(
   startEp: number,
   endEp: number
 ): LLMMessage[] {
-  const _ = item;
   const overseas = project.targetMarket === "overseas";
+  const charactersBlock = item.charactersMd?.trim()
+    ? ["", "【人物表（分镜里出现的人物姓名/称呼必须严格使用以下命名）】", item.charactersMd.trim()].join("\n")
+    : "";
+  const outlineSlice = sliceOutlineByEpisodes(item.outlineMd, startEp, endEp);
+  const outlineBlock = outlineSlice
+    ? ["", `【分集大纲（仅本批次第 ${startEp}-${endEp} 集，分镜镜头序列必须能对应到大纲核心冲突 + 钩子）】`, outlineSlice].join("\n")
+    : "";
   return [
     {
       role: "system",
       content:
-        "你是 Drama Studio 主链路里的分镜导演。请按红果短剧拍摄用的逐秒分镜表输出：每个镜头一行，固定七列「镜头号 | 逐秒分镜画面描述 | 中英双语台词 | 运镜方式/景别 | 人物图/场景图 | 备注 | 时长」，每镜默认 4 秒，整集累计约 60–66 秒。",
+        "你是 Drama Studio 主链路里的分镜导演。请按红果短剧拍摄用的逐秒分镜表输出：每个镜头一行，固定七列「镜头号 | 逐秒分镜画面描述 | 中英双语台词 | 运镜方式/景别 | 人物图/场景图 | 备注 | 时长」，每镜默认 4 秒，整集累计约 60–66 秒。**台词列里出现的角色名必须与 user 消息【人物表】完全一致；分镜镜头序列要让大纲里这一集的核心冲突 + 钩子有明确的镜头落地。**",
     },
     {
       role: "user",
@@ -680,6 +686,8 @@ export function buildStoryboardChunkMessages(
         startEp > 1
           ? `【硬性铁则】你的输出必须以「## 第 ${startEp} 集分镜（约 X s）」作为第一个标题。**禁止**重写第 1 集到第 ${startEp - 1} 集分镜中的任何一集。如果你写了第 ${startEp - 1} 集或之前的分镜，整批将被丢弃。`
           : "",
+        charactersBlock,
+        outlineBlock,
         "",
         "【完整剧本（仅本区间）】",
         screenplaySlice,
