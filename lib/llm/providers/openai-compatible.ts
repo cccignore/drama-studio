@@ -8,6 +8,11 @@ import { fetchWithRetry } from "../retry";
 // keepalive — so the timer resets on every event, not just visible content.
 // Without this, a yunwu-style relay can hold the connection open for 5+ min
 // before silently closing with [DONE] and zero deltas.
+//
+// The timer is also reset between fetchWithRetry attempts (via the onRetry
+// callback below), because the upstream may take tens of seconds to fail
+// before a retry runs — counting that against the "no new token" window
+// would force a false idle_timeout on the next attempt.
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 function normalizeFinishReason(raw: unknown): LLMFinishReason | undefined {
@@ -63,6 +68,10 @@ export async function* streamOpenAICompat(
           console.warn(
             `[llm-retry] ${cfg.name} (${cfg.model}) attempt ${attempt} in ${delayMs}ms · ${reason}`
           );
+          // Each retry gets a fresh idle window — otherwise a slow first
+          // attempt eats the budget and the next attempt is killed before
+          // it can produce anything.
+          armIdleTimer();
         },
       }
     );

@@ -4,6 +4,8 @@ import { iterSSELines } from "../sse-parse";
 import { friendlyNetworkError, friendlyUpstreamError } from "../provider-error";
 import { fetchWithRetry } from "../retry";
 
+// See openai-compatible.ts for the rationale — same timer, same reset-on-retry
+// behavior, registered in the onRetry callback below.
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 function mapStopReason(raw: unknown): LLMFinishReason | undefined {
@@ -78,6 +80,7 @@ export async function* streamAnthropicCompat(
           console.warn(
             `[llm-retry] ${cfg.name} (${cfg.model}) attempt ${attempt} in ${delayMs}ms · ${reason}`
           );
+          armIdleTimer();
         },
       }
     );

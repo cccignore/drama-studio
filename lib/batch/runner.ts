@@ -820,7 +820,11 @@ function sliceScreenplayByEpisodes(
 // from where it left off (see continueFrom logic in the screenplay/storyboard
 // chunk drivers).
 const MAX_CHUNK_ATTEMPTS = 3;
-const RETRY_BACKOFF_MS = 4000;
+// Backoff between chunk-level retries. Bumped from 4s because upstream wobbles
+// on yunwu-style relays often last several minutes — retrying after 4s/8s
+// usually hits the same broken window. 15s/30s gives the relay a real chance
+// to reconnect to a healthy backend before we burn another attempt.
+const RETRY_BACKOFF_MS = 15_000;
 
 interface ChunkResult {
   content: string;
