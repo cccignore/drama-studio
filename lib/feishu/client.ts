@@ -211,7 +211,7 @@ export interface SchemaSpec {
 // caller hasn't yet customized the table (≥ half of the requested schema is
 // still missing), we rewrite the defaults — rename 文本→剧名 and 附件→完整剧本
 // where compatible, and delete 单选 — so the final table ends up with exactly
-// the requested 6 columns instead of 6 + 3 leftover defaults.
+// the requested schema columns instead of N + 3 leftover defaults.
 //
 // On subsequent exports the schema fields exist, so nothing is renamed or
 // deleted; user-added fields are never touched.
@@ -319,4 +319,28 @@ export async function createRecord(
     (raw) => raw as { record: { record_id: string } }
   );
   return { recordId: data.record.record_id };
+}
+
+// Freshly-created bitables ship with 10 blank records in their default
+// table. Without removing them, our exported rows render at index 11+ and
+// the auto row-height collapses around the empty rows. Pulls all records
+// (no need to paginate beyond the default 10) and batch-deletes them.
+export async function deleteAllRecords(token: string, appToken: string, tableId: string): Promise<number> {
+  const data = await api<{ items?: Array<{ record_id: string }>; total?: number }>(
+    `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`,
+    { method: "GET", token },
+    (raw) => raw as { items?: Array<{ record_id: string }>; total?: number }
+  );
+  const ids = (data.items ?? []).map((r) => r.record_id);
+  if (!ids.length) return 0;
+  await api<unknown>(
+    `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_delete`,
+    {
+      method: "POST",
+      token,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ records: ids }),
+    }
+  );
+  return ids.length;
 }

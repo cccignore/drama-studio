@@ -1,9 +1,10 @@
 import type { BatchItem, BatchProject } from "../batch/types";
-import { buildBatchArtifactDocx } from "../batch/feishu-docx";
+import { buildBatchArtifactDocx, buildStoryboardDocx } from "../batch/feishu-docx";
 import {
   FeishuError,
   createBitable,
   createRecord,
+  deleteAllRecords,
   ensureFields,
   getTenantAccessToken,
   uploadMedia,
@@ -11,7 +12,7 @@ import {
 } from "./client";
 
 const SCHEMA: SchemaSpec[] = [
-  { name: "序号", kind: "text" },
+  // 飞书表格自带行号列，所以不再单独加「序号」字段。
   { name: "日期", kind: "datetime" },
   { name: "剧名", kind: "text" },
   { name: "三幕创意", kind: "text" },
@@ -82,6 +83,9 @@ export async function exportBatchToFeishu(
   const bitableName = bitableNameFor(project);
   const { appToken, tableId, url: createdUrl } = await createBitable(token, bitableName, opts.folderToken);
   await ensureFields(token, appToken, tableId, SCHEMA);
+  // Fresh bitables ship with 10 blank records in their default table; remove
+  // them so our exported rows actually start at row 1.
+  await deleteAllRecords(token, appToken, tableId);
 
   const skipped: Array<{ title: string; reason: string }> = [];
   let exported = 0;
@@ -104,7 +108,7 @@ export async function exportBatchToFeishu(
           })
         : null;
       const storyboardBuf = item.storyboardMd?.trim()
-        ? await buildBatchArtifactDocx({
+        ? await buildStoryboardDocx({
             title: `${title} · 分镜脚本`,
             subtitle: `${project.title} · ${project.totalEpisodes} 集`,
             body: item.storyboardMd,
@@ -119,7 +123,6 @@ export async function exportBatchToFeishu(
         : null;
 
       const fields: Record<string, string | number | Array<{ file_token: string }>> = {
-        序号: String(i + 1),
         日期: exportedAt,
         剧名: title,
         三幕创意: preview(creativeBlock(item)),
